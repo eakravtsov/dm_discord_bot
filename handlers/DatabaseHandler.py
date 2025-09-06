@@ -49,7 +49,8 @@ class DatabaseHandler:
                     transaction.set(user_doc_ref, {'history': initial_history})
                     logging.info(f"No history found for user {user_id}. Creating new game document.")
 
-            await self.db.transaction()(check_and_create)
+            # CORRECTED LINE: Create the transaction and pass it to the decorated function.
+            await check_and_create(self.db.transaction())
             return user_doc_ref
         except Exception as e:
             logging.error(f"Error ensuring document exists for user {user_id}", exc_info=e)
