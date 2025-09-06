@@ -1,4 +1,4 @@
-python-dotenv
 discord.py
-langchain_huggingface
-google.generativeai
+google-generativeai
+python-dotenv
+google-cloud-firestore
