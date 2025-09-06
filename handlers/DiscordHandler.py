@@ -39,6 +39,26 @@ class DiscordHandler(discord.Client):
             logging.info(f"User started a new game.", extra=log_payload)
             return
 
+        # ... inside on_message method in DiscordHandler.py
+
+        if user_message.lower() == '!replay':
+            history = await self.game_manager.get_history(user_id)
+
+            # Search backwards for the last message from the 'model' (the DM)
+            last_dm_message = None
+            for message_entry in reversed(history):
+                if message_entry.get('role') == 'model':
+                    # Extract the actual text from the 'parts' list
+                    last_dm_message = message_entry.get('parts', [None])[0]
+                    break  # Stop after finding the first one
+
+            if last_dm_message:
+                replayed_message = f"*(Replaying last message)*\n>>> {last_dm_message}"
+                await message.channel.send(replayed_message)
+            else:
+                await message.channel.send("There are no messages from the DM to replay yet!")
+            return  # Make sure to return after handling the command
+
         logging.info(f"Received message: '{user_message}'", extra=log_payload)
 
         async with message.channel.typing():
