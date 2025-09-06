@@ -3,3 +3,5 @@ google-generativeai
 python-dotenv
 google-cloud-firestore
 google-cloud-logging
+Flask
+gunicorn

@@ -12,7 +12,7 @@ class LLMHandler:
         self.model = genai.GenerativeModel(
             'gemini-2.5-flash',
             generation_config=genai.GenerationConfig(
-                temperature=0.8, top_p=0.95, top_k=40
+                temperature=0.8, top_p=0.95, top_k=40, max_output_tokens=1800
             )
         )
         logging.info("Generative AI model configured successfully.")

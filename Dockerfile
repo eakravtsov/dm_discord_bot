@@ -7,4 +7,5 @@ COPY DMBot.py .
 COPY helpers/ ./helpers/
 COPY handlers/ ./handlers/
 
-CMD ["python", "DMBot.py"]
+ENV PORT 8080
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 DMBot:app
