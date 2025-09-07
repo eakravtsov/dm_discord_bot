@@ -16,7 +16,7 @@ steps:
     - 'compute'
     - 'ssh'
     # --- VM Details ---
-    - '--zone=us-central1-a'
+    - '--zone=us-central1-c'
     # --- THIS IS THE CRITICAL CHANGE ---
     # Prepend your username to the VM name.
     - 'eakravtsov@discord-bot-vm'
