@@ -23,3 +23,6 @@ steps:
         echo "INFO: Python dependencies updated." &&
         sudo systemctl restart discord-bot.service &&
         echo "INFO: Bot service restarted. Deployment complete."
+
+options:
+  logging: CLOUD_LOGGING_ONLY
