@@ -1,7 +1,6 @@
 import google.generativeai as genai
 import logging
 
-
 class LLMHandler:
     """Handles interactions with the Google Gemini model."""
 

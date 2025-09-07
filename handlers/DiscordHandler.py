@@ -1,9 +1,6 @@
 import discord
 import logging
 
-from click.shell_completion import split_arg_string
-
-
 class DiscordHandler(discord.Client):
     """The main Discord bot class that ties everything together."""
 

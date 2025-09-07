@@ -1,0 +1,25 @@
+# cloudbuild.yaml
+steps:
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'gcloud'
+  args:
+    - 'compute'
+    - 'ssh'
+    # --- VM Details ---
+    # Replace the zone if you chose a different one.
+    - '--zone=us-central1-a'
+    - 'discord-bot-vm'
+    # --- Remote Command to Execute on the VM ---
+    - '--command'
+    - >-
+        echo "INFO: Starting deployment on discord-bot-vm..." &&
+        cd /opt/apps/discord-bot &&
+        git fetch --all &&
+        git reset --hard origin/computeEngineVersion &&
+        echo "INFO: Latest code pulled successfully." &&
+        chown -R discordbot:discordbot . &&
+        echo "INFO: File ownership reset." &&
+        sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt &&
+        echo "INFO: Python dependencies updated." &&
+        sudo systemctl restart discord-bot.service &&
+        echo "INFO: Bot service restarted. Deployment complete."
