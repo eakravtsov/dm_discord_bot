@@ -1,12 +1,25 @@
 # cloudbuild.yaml
 steps:
+# STEP 1: Prepare the SSH environment for the gcloud command.
+# This step prevents the interactive prompt for SSH key generation.
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    # Create the directory gcloud expects for its SSH keys.
+    mkdir -p /builder/home/.ssh
+    # Generate a dummy SSH key non-interactively.
+    # The key itself won't be used, but its existence prevents gcloud from trying to create one.
+    ssh-keygen -t rsa -f /builder/home/.ssh/google_compute_engine -N '' -q -C 'cloudbuild'
+
+# STEP 2: Your original deployment step. It will now run without interruption.
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
     - 'compute'
     - 'ssh'
     # --- VM Details ---
-    # Replace the zone if you chose a different one.
     - '--zone=us-central1-a'
     - 'discord-bot-vm'
     # --- Remote Command to Execute on the VM ---
@@ -24,5 +37,6 @@ steps:
         sudo systemctl restart discord-bot.service &&
         echo "INFO: Bot service restarted. Deployment complete."
 
+# --- Logging option to solve the previous issue ---
 options:
   logging: CLOUD_LOGGING_ONLY
