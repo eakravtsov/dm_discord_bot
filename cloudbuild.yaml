@@ -1,15 +1,6 @@
-# cloudbuild.yaml
-steps:
-# STEP 1: Prepare the SSH environment for the gcloud command.
-- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    mkdir -p /builder/home/.ssh
-    ssh-keygen -t rsa -f /builder/home/.ssh/google_compute_engine -N '' -q -C 'cloudbuild'
 
-# STEP 2: Your deployment step, now with the correct user specified.
+
+# STEP 1: Your deployment step, now with the correct user specified.
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
@@ -37,5 +28,5 @@ steps:
         echo "INFO: Bot service restarted. Deployment complete."
 
 # --- Logging option ---
-options:
+- options:
   logging: CLOUD_LOGGING_ONLY
