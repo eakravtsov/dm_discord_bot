@@ -22,6 +22,7 @@ def main():
         logging.critical("One or more critical environment variables (DISCORD_TOKEN, GOOGLE_API_KEY, GCP_PROJECT_ID) are missing. Shutting down.")
         return  # Exit the application
 
+    logging.info("Configuration loaded successfully.")
     # --- Initialize Handlers ---
     try:
         # Database handler is critical, initialize it first.
