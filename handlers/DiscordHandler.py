@@ -1,6 +1,9 @@
 import discord
 import logging
 
+from click.shell_completion import split_arg_string
+
+
 class DiscordHandler(discord.Client):
     """The main Discord bot class that ties everything together."""
 
@@ -67,7 +70,32 @@ class DiscordHandler(discord.Client):
                 history = await self.game_manager.get_history(user_id)
                 dm_response = await self.llm.generate_response(history)
                 await self.game_manager.add_message(user_id, 'model', dm_response)
-                await message.channel.send(dm_response)
+                chunks = split_string_by_word_chunks(dm_response, 1900)
+                for chunk in chunks:
+                    await message.channel.send(chunk)
             except Exception as e:
                 logging.error(f"An error occurred while processing a message for user {user_id}", exc_info=e)
                 await message.channel.send("A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
+
+
+def split_string_by_word_chunks(text, max_length):
+    words = text.split()  # Split the string into words
+    chunks = []
+    current_chunk = ""
+
+    for word in words:
+        # Check if adding the current word (plus a space if needed) exceeds max_length
+        if current_chunk and len(current_chunk) + 1 + len(word) > max_length:
+            chunks.append(current_chunk.strip())  # Add the completed chunk
+            current_chunk = word  # Start a new chunk with the current word
+        else:
+            if current_chunk:
+                current_chunk += " " + word
+            else:
+                current_chunk = word
+
+    if current_chunk:  # Add any remaining part of the string as a chunk
+        chunks.append(current_chunk.strip())
+
+    return chunks
+

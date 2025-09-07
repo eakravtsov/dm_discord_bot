@@ -11,14 +11,15 @@ from handlers.DiscordHandler import DiscordHandler
 setup_logging()
 app = Flask(__name__)
 
+
 @app.route("/")
 def health_check():
     """Health check endpoint for Cloud Run."""
     return "OK", 200
 
+
 def run_bot():
     """Initializes and runs the Discord bot in a dedicated thread."""
-    # Each thread needs its own asyncio event loop.
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -42,8 +43,14 @@ def run_bot():
     # --- Run Bot ---
     try:
         llm_handler = LLMHandler(api_key=config.get("GOOGLE_API_KEY"))
+
+        # --- NEW: Connect the handlers ---
+        # This gives the DatabaseHandler a reference to the LLMHandler,
+        # allowing it to call the summarize function when needed.
+        db_handler.set_llm_handler(llm_handler)
+
         discord_client = DiscordHandler(llm_handler=llm_handler, game_manager=db_handler)
-        # Use start() instead of run() for non-blocking execution in a thread.
+
         loop.run_until_complete(discord_client.start(config.get("DISCORD_TOKEN")))
     except Exception as e:
         logging.critical(f"An unexpected error occurred in the bot thread.", exc_info=e)
@@ -51,12 +58,9 @@ def run_bot():
         loop.close()
         logging.info("Bot thread event loop closed.")
 
+
 # --- Start the Bot in a Background Thread ---
-# This code runs when the module is imported by Gunicorn.
 logging.info("Starting Discord bot in a background thread.")
 bot_thread = threading.Thread(target=run_bot, daemon=True)
 bot_thread.start()
-
-# The 'if __name__ == "__main__":' block is removed.
-# Gunicorn now serves as the entry point for the application.
 
