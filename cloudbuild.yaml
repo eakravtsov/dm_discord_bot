@@ -20,7 +20,7 @@ steps:
     - 'compute'
     - 'ssh'
     # --- VM Details ---
-    - '--zone=us-central1-a'
+    - '--zone=us-central1-c'
     - 'discord-bot-vm'
     # --- Remote Command to Execute on the VM ---
     - '--command'
