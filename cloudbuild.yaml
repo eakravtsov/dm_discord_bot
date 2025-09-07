@@ -1,6 +1,7 @@
+# cloudbuild.yaml
 
-
-# STEP 1: Your deployment step, now with the correct user specified.
+steps:
+# This is the single, original step to SSH and deploy.
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
@@ -8,25 +9,12 @@
     - 'ssh'
     # --- VM Details ---
     - '--zone=us-central1-c'
-    # --- THIS IS THE CRITICAL CHANGE ---
-    # Prepend your username to the VM name.
     - 'eakravtsov@discord-bot-vm'
     # --- Remote Command to Execute on the VM ---
     - '--command'
     - >-
-        echo "INFO: Logged in successfully. Starting deployment..." &&
-        # Use sudo for commands that require root privileges.
-        cd /opt/apps/discord-bot &&
-        sudo git fetch --all &&
-        sudo git reset --hard origin/computeEngineVersion &&
-        echo "INFO: Latest code pulled successfully." &&
-        sudo chown -R discordbot:discordbot . &&
-        echo "INFO: File ownership reset." &&
-        sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt &&
-        echo "INFO: Python dependencies updated." &&
-        sudo systemctl restart discord-bot.service &&
-        echo "INFO: Bot service restarted. Deployment complete."
+        cd /opt/apps/discord-bot && sudo git fetch --all && sudo git reset --hard origin/computeEngineVersion && sudo chown -R discordbot:discordbot . && sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt && sudo systemctl restart discord-bot.service
 
-# --- Logging option ---
-- options:
+# --- The required logging option ---
+options:
   logging: CLOUD_LOGGING_ONLY
