@@ -1,66 +1,61 @@
+# --- DMBot.py (Refactored for Compute Engine) ---
+
 import logging
-import threading
 import asyncio
-from flask import Flask
 from helpers.ConfigurationHelper import setup_logging, load_config, SYSTEM_PROMPT
 from handlers.DatabaseHandler import DatabaseHandler
 from handlers.LLMHandler import LLMHandler
 from handlers.DiscordHandler import DiscordHandler
 
-# --- Setup Logging and Flask App ---
+# --- Setup Logging ---
 setup_logging()
-app = Flask(__name__)
 
+def main():
+    """
+    Initializes and runs the Discord bot application.
+    """
+    logging.info("Starting Dungeon Master Bot...")
 
-@app.route("/")
-def health_check():
-    """Health check endpoint for Cloud Run."""
-    return "OK", 200
-
-
-def run_bot():
-    """Initializes and runs the Discord bot in a dedicated thread."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    logging.info("Bot thread started.")
+    # --- Load and Validate Configuration ---
     config = load_config()
-
-    # --- Validate Configuration ---
     if not all([config.get("DISCORD_TOKEN"), config.get("GOOGLE_API_KEY"), config.get("GCP_PROJECT_ID")]):
-        logging.critical("One or more environment variables are missing. Bot thread exiting.")
-        return
+        logging.critical("One or more critical environment variables (DISCORD_TOKEN, GOOGLE_API_KEY, GCP_PROJECT_ID) are missing. Shutting down.")
+        return  # Exit the application
 
-    # --- Initialize Services ---
-    db_handler = DatabaseHandler(
-        project_id=config.get("GCP_PROJECT_ID"),
-        system_prompt=SYSTEM_PROMPT
-    )
-    if not db_handler.is_initialized():
-        logging.critical("Firestore client could not be initialized. Bot thread exiting.")
-        return
-
-    # --- Run Bot ---
+    # --- Initialize Handlers ---
     try:
+        # Database handler is critical, initialize it first.
+        db_handler = DatabaseHandler(
+            project_id=config.get("GCP_PROJECT_ID"),
+            system_prompt=SYSTEM_PROMPT
+        )
+        if not db_handler.is_initialized():
+            logging.critical("Firestore client could not be initialized. Shutting down.")
+            return # Exit the application
+
+        # Initialize the LLM handler.
         llm_handler = LLMHandler(api_key=config.get("GOOGLE_API_KEY"))
 
-        # --- NEW: Connect the handlers ---
-        # This gives the DatabaseHandler a reference to the LLMHandler,
-        # allowing it to call the summarize function when needed.
+        # Connect the LLM handler to the database handler for summarization.
         db_handler.set_llm_handler(llm_handler)
 
+        # Initialize the Discord client, passing it the other handlers.
         discord_client = DiscordHandler(llm_handler=llm_handler, game_manager=db_handler)
 
-        loop.run_until_complete(discord_client.start(config.get("DISCORD_TOKEN")))
     except Exception as e:
-        logging.critical(f"An unexpected error occurred in the bot thread.", exc_info=e)
+        logging.critical(f"A fatal error occurred during service initialization.", exc_info=e)
+        return # Exit the application
+
+    # --- Run the Bot ---
+    try:
+        logging.info("All services initialized. Starting the Discord client.")
+        # This is a blocking call that runs the bot's event loop.
+        # It will run indefinitely until the bot is disconnected or an error occurs.
+        asyncio.run(discord_client.start(config.get("DISCORD_TOKEN")))
+    except Exception as e:
+        logging.critical(f"An unexpected error occurred while running the bot.", exc_info=e)
     finally:
-        loop.close()
-        logging.info("Bot thread event loop closed.")
+        logging.info("Bot has been shut down.")
 
-
-# --- Start the Bot in a Background Thread ---
-logging.info("Starting Discord bot in a background thread.")
-bot_thread = threading.Thread(target=run_bot, daemon=True)
-bot_thread.start()
-
+if __name__ == "__main__":
+    main()
