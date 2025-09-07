@@ -1,42 +1,41 @@
 # cloudbuild.yaml
 steps:
 # STEP 1: Prepare the SSH environment for the gcloud command.
-# This step prevents the interactive prompt for SSH key generation.
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'bash'
   args:
   - '-c'
   - |
-    # Create the directory gcloud expects for its SSH keys.
     mkdir -p /builder/home/.ssh
-    # Generate a dummy SSH key non-interactively.
-    # The key itself won't be used, but its existence prevents gcloud from trying to create one.
     ssh-keygen -t rsa -f /builder/home/.ssh/google_compute_engine -N '' -q -C 'cloudbuild'
 
-# STEP 2: Your original deployment step. It will now run without interruption.
+# STEP 2: Your deployment step, now with the correct user specified.
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
     - 'compute'
     - 'ssh'
     # --- VM Details ---
-    - '--zone=us-central1-c'
-    - 'discord-bot-vm'
+    - '--zone=us-central1-a'
+    # --- THIS IS THE CRITICAL CHANGE ---
+    # Prepend your username to the VM name.
+    - 'eakravtsov@discord-bot-vm'
     # --- Remote Command to Execute on the VM ---
     - '--command'
     - >-
-        echo "INFO: Starting deployment on discord-bot-vm..." &&
+        echo "INFO: Logged in successfully. Starting deployment..." &&
+        # Use sudo for commands that require root privileges.
         cd /opt/apps/discord-bot &&
-        git fetch --all &&
-        git reset --hard origin/computeEngineVersion &&
+        sudo git fetch --all &&
+        sudo git reset --hard origin/computeEngineVersion &&
         echo "INFO: Latest code pulled successfully." &&
-        chown -R discordbot:discordbot . &&
+        sudo chown -R discordbot:discordbot . &&
         echo "INFO: File ownership reset." &&
         sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt &&
         echo "INFO: Python dependencies updated." &&
         sudo systemctl restart discord-bot.service &&
         echo "INFO: Bot service restarted. Deployment complete."
 
-# --- Logging option to solve the previous issue ---
+# --- Logging option ---
 options:
   logging: CLOUD_LOGGING_ONLY
