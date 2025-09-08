@@ -1,0 +1,126 @@
+import random
+import re
+import logging
+
+def roll_dice(expression: str) -> int:
+    """
+    Rolls dice based on a D&D-style string expression.
+
+    This function parses a string like '1d20+2d6+3', rolls the specified dice,
+    sums the results, and adds any flat modifiers. The components can be in
+    any order.
+
+    Args:
+        expression: A string representing the dice to roll, with components
+                    separated by '+'. E.g., '1d20+3', '2d4+1d8', '5+3d6'.
+
+    Returns:
+        The integer result of the total roll plus modifiers.
+
+    Raises:
+        ValueError: If the expression contains invalid components (e.g., '1d',
+                    '2d6+e', or any non-numeric/non-'d' characters).
+    """
+    if not isinstance(expression, str):
+        raise TypeError("Expression must be a string.")
+
+    components = expression.split('+')
+    total_roll = 0
+    dice_pattern = re.compile(r'^\s*(\d*)d(\d+)\s*$')
+    modifier_pattern = re.compile(r'^\s*(\d+)\s*$')
+
+    for component in components:
+        component = component.strip()
+        dice_match = dice_pattern.match(component)
+        modifier_match = modifier_pattern.match(component)
+
+        if dice_match:
+            num_dice_str, num_sides_str = dice_match.groups()
+            num_dice = int(num_dice_str) if num_dice_str else 1
+            num_sides = int(num_sides_str)
+            if num_dice < 1 or num_sides < 1:
+                raise ValueError("Number of dice and sides must be at least 1.")
+            for _ in range(num_dice):
+                total_roll += random.randint(1, num_sides)
+        elif modifier_match:
+            total_roll += int(modifier_match.group(0))
+        else:
+            raise ValueError(f"Invalid component in expression: '{component}'")
+    return total_roll
+
+
+class CommandHandler:
+    """Handles all user commands starting with '!'."""
+
+    def __init__(self, game_manager):
+        self.game_manager = game_manager
+        self.commands = {
+            "newgame": self.handle_newgame,
+            "replay": self.handle_replay,
+            "roll": self.handle_roll,
+            "help": self.handle_help,
+        }
+
+    async def process_command(self, message, log_payload):
+        """Routes a command to the appropriate handler method."""
+        user_message = message.content.replace(f'<@{message.client.user.id}>', '').strip()
+        parts = user_message[1:].lower().split()
+        command = parts[0]
+        args = parts[1:]
+
+        handler = self.commands.get(command)
+        if handler:
+            await handler(message, args, log_payload)
+        else:
+            await message.channel.send(f"Unknown command: `!{command}`. Type `!help` for a list of available commands.")
+
+    async def handle_newgame(self, message, args, log_payload):
+        """Resets the user's game history."""
+        user_id = str(message.author.id)
+        await self.game_manager.reset_history(user_id)
+        await message.channel.send(
+            "The mists clear, and a new adventure begins for you... (Your story has been reset). What do you do?")
+        logging.info("User started a new game.", extra=log_payload)
+
+    async def handle_replay(self, message, args, log_payload):
+        """Replays the last message from the Dungeon Master."""
+        user_id = str(message.author.id)
+        history = await self.game_manager.get_history(user_id)
+        last_dm_message = next((m.get('parts', [None])[0] for m in reversed(history) if m.get('role') == 'model'), None)
+
+        if last_dm_message:
+            replayed_message = f"*(Replaying last message)*\n>>> {last_dm_message}"
+            await message.channel.send(replayed_message)
+        else:
+            await message.channel.send("There are no messages from the DM to replay yet!")
+        logging.info("User replayed last message.", extra=log_payload)
+
+    async def handle_roll(self, message, args, log_payload):
+        """Rolls dice based on D&D notation."""
+        if not args:
+            await message.channel.send("Please provide a dice expression to roll, like `!roll 1d20+3`.")
+            return
+
+        expression = "".join(args)
+        try:
+            result = roll_dice(expression)
+            await message.channel.send(f"{message.author.mention} rolls `{expression}` and gets: **{result}**")
+            logging.info(f"User rolled '{expression}' with result {result}.", extra=log_payload)
+        except (ValueError, TypeError) as e:
+            await message.channel.send(
+                f"I couldn't understand that roll. Please use D&D notation like `1d20` or `2d6+4`.\n*Error: {e}*")
+
+    async def handle_help(self, message, args, log_payload):
+        """Displays a help message with all available commands."""
+        help_text = """
+        **Available Commands:**
+        `!newgame` - Resets your current adventure and starts a new one.
+        `!replay` - Shows the last message from the Dungeon Master again.
+        `!roll <notation>` - Rolls dice using D&D notation (e.g., `!roll 1d20+2d6+3`).
+        `!help` - Shows this help message.
+
+        To interact with the Dungeon Master, just `@` me and describe what you want to do!
+        """
+        await message.channel.send(help_text)
+        logging.info("User requested help.", extra=log_payload)
+
