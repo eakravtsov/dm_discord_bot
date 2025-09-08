@@ -1,6 +1,7 @@
 import discord
 import logging
 import re
+import asyncio
 
 from handlers.CommandHandler import CommandHandler, DiceRollView
 
@@ -38,6 +39,37 @@ class DiscordHandler(discord.Client):
 
         return f"{ent_type}: {name} is an entity whose " + ", and ".join(props) + "."
 
+    async def _run_rag_cycle(self, user_id: str, author: discord.User, message_to_process: str):
+        """
+        Runs a full RAG cycle: Retrieve, Augment, Generate.
+        Returns the DM's response and any UI view to be sent.
+        """
+        # --- Read/Retrieval Phase ---
+        relevant_entity_ids = await self.vector_store_handler.query(user_id, message_to_process)
+        context_string = ""
+        if relevant_entity_ids:
+            context_items = []
+            for entity_id in relevant_entity_ids:
+                context = await self.graph_handler.get_entity_context(user_id, entity_id)
+                if context:
+                    context_items.append(context)
+            if context_items:
+                context_string = "\n".join(context_items)
+
+        # --- Augmented Generation Phase ---
+        await self.game_manager.add_message(user_id, 'user', f"{author.name} says: {message_to_process}")
+        history = await self.game_manager.get_history(user_id)
+        dm_response = await self.llm.generate_response(history, context_string)
+        await self.game_manager.add_message(user_id, 'model', dm_response)
+
+        # --- Determine if UI is needed ---
+        view_to_send = None
+        roll_keywords = ["make a roll", "roll a", "make a check", "roll for"]
+        if any(keyword in dm_response.lower() for keyword in roll_keywords):
+            view_to_send = DiceRollView(author=author)
+
+        return dm_response, view_to_send
+
     async def on_message(self, message):
         if message.author == self.user:
             return
@@ -47,89 +79,60 @@ class DiscordHandler(discord.Client):
             return
 
         user_id = str(message.author.id)
-
-        # This will be our initial message to process.
-        # It can be updated later by an automated dice roll.
         message_to_process = user_message_raw.replace(f'<@{self.user.id}>', '').strip()
 
-        # The main loop. It will run once for a normal message, and multiple
-        # times if an automated action (like a dice roll) occurs.
-        while message_to_process:
-            log_payload = {
-                "discord_user": message.author.name,
-                "user_id": user_id,
-                "message_length": len(message_to_process),
-            }
+        # Handle commands separately
+        if message_to_process.startswith('!'):
+            log_payload = {"discord_user": message.author.name, "user_id": user_id}
+            await self.command_handler.process_command(message, log_payload)
+            return
 
-            if message_to_process.startswith('!'):
-                await self.command_handler.process_command(message, log_payload)
-                return  # Exit after a command
+        # --- Main Game Loop ---
+        try:
+            # Loop continues as long as there is an automated action (like a dice roll)
+            while message_to_process:
+                log_payload = {
+                    "discord_user": message.author.name, "user_id": user_id, "message_length": len(message_to_process)
+                }
+                logging.info(f"Processing message: '{message_to_process}'", extra=log_payload)
 
-            logging.info(f"Processing message: '{message_to_process}'", extra=log_payload)
+                dm_response = None
+                view_to_send = None
 
-            try:
+                # --- Generation Phase (Typing indicator is active here) ---
                 async with message.channel.typing():
-                    # --- Read/Retrieval Phase ---
-                    relevant_entity_ids = await self.vector_store_handler.query(user_id, message_to_process)
-                    context_string = ""
-                    if relevant_entity_ids:
-                        context_items = []
-                        for entity_id in relevant_entity_ids:
-                            context = await self.graph_handler.get_entity_context(user_id, entity_id)
-                            if context:
-                                context_items.append(context)
-                        if context_items:
-                            context_string = "\n".join(context_items)
+                    dm_response, view_to_send = await self._run_rag_cycle(user_id, message.author, message_to_process)
 
-                    # --- Augmented Generation Phase ---
-                    # Use the message_to_process in the history
-                    await self.game_manager.add_message(user_id, 'user',
-                                                        f"{message.author.name} says: {message_to_process}")
-                    history = await self.game_manager.get_history(user_id)
-                    dm_response = await self.llm.generate_response(history, context_string)
-                    await self.game_manager.add_message(user_id, 'model', dm_response)
-
-                    # --- Respond to User (with potential UI) ---
+                # --- Send Response Phase (Typing indicator is now off) ---
+                if dm_response:
                     chunks = split_string_by_word_chunks(dm_response, 1900)
-                    view_to_send = None
-
-                    roll_keywords = ["make a roll", "roll a", "make a check", "roll for"]
-                    if any(keyword in dm_response.lower() for keyword in roll_keywords):
-                        view_to_send = DiceRollView(author=message.author)
-
                     for i, chunk in enumerate(chunks):
-                        if i == len(chunks) - 1:
+                        if i == len(chunks) - 1:  # Attach view only to the last chunk
                             await message.channel.send(chunk, view=view_to_send)
                         else:
                             await message.channel.send(chunk)
 
-                    # --- Write/Memory Phase ---
-                    conversation_chunk = f"Player: {message_to_process}\nDM: {dm_response}"
-                    entities = await self.llm.extract_facts(conversation_chunk)
+                # --- Silent Write/Memory Phase (No typing indicator) ---
+                conversation_chunk = f"Player: {message_to_process}\nDM: {dm_response}"
+                entities = await self.llm.extract_facts(conversation_chunk)
+                if entities:
+                    for entity in entities:
+                        node_id = await self.graph_handler.add_or_update_entity(user_id, entity)
+                        if node_id:
+                            sentence = self._create_descriptive_sentence(entity)
+                            await self.vector_store_handler.add_or_update_entry(user_id, sentence, node_id)
 
-                    if entities:
-                        for entity in entities:
-                            node_id = await self.graph_handler.add_or_update_entity(user_id, entity)
-                            if node_id:
-                                sentence = self._create_descriptive_sentence(entity)
-                                await self.vector_store_handler.add_or_update_entry(user_id, sentence, node_id)
+                # --- Loop Continuation Logic ---
+                if view_to_send:
+                    await view_to_send.interaction_complete.wait()
+                    message_to_process = view_to_send.roll_result_message
+                else:
+                    message_to_process = None  # Exit loop if no UI was sent
 
-                    # --- Loop continuation logic ---
-                    if view_to_send:
-                        # Wait for the user to click a button
-                        await view_to_send.interaction_complete.wait()
-                        # The view now has the result. Set it as the next message to process.
-                        message_to_process = view_to_send.roll_result_message
-                    else:
-                        # If no view was sent, there's no automatic follow-up. Exit the loop.
-                        message_to_process = None
-
-            except Exception as e:
-                logging.error(f"An error occurred in RAG workflow for user {user_id}", exc_info=e)
-                await message.channel.send(
-                    "A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
-                # Exit loop on error
-                message_to_process = None
+        except Exception as e:
+            logging.error(f"An error occurred in main workflow for user {user_id}", exc_info=e)
+            await message.channel.send(
+                "A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
 
 
 def split_string_by_word_chunks(text, max_length):
