@@ -1,7 +1,7 @@
 # --- cloudbuild.yaml ---
 # This file defines a simple, single-step build process that securely
 # deploys the bot by executing a self-contained script on the VM.
-# The VM's service account is responsible for fetching secrets.
+
 steps:
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Connect, Update, and Deploy'
@@ -34,7 +34,6 @@ steps:
           
           # 5. Restart the systemd service to apply all changes.
           sudo systemctl restart discord-bot.service
-
 
 options:
   logging: CLOUD_LOGGING_ONLY
