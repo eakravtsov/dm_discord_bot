@@ -1,25 +1,12 @@
+import discord
+import logging
 import random
 import re
-import logging
+
 
 def roll_dice(expression: str) -> int:
     """
     Rolls dice based on a D&D-style string expression.
-
-    This function parses a string like '1d20+2d6+3', rolls the specified dice,
-    sums the results, and adds any flat modifiers. The components can be in
-    any order.
-
-    Args:
-        expression: A string representing the dice to roll, with components
-                    separated by '+'. E.g., '1d20+3', '2d4+1d8', '5+3d6'.
-
-    Returns:
-        The integer result of the total roll plus modifiers.
-
-    Raises:
-        ValueError: If the expression contains invalid components (e.g., '1d',
-                    '2d6+e', or any non-numeric/non-'d' characters).
     """
     if not isinstance(expression, str):
         raise TypeError("Expression must be a string.")
@@ -52,8 +39,15 @@ def roll_dice(expression: str) -> int:
 class CommandHandler:
     """Handles all user commands starting with '!'."""
 
-    def __init__(self, game_manager):
+    def __init__(self, game_manager, client):
+        """
+        Initializes the CommandHandler.
+        Args:
+            game_manager: The game manager instance.
+            client: The main discord.Client instance.
+        """
         self.game_manager = game_manager
+        self.client = client
         self.commands = {
             "newgame": self.handle_newgame,
             "replay": self.handle_replay,
@@ -63,7 +57,8 @@ class CommandHandler:
 
     async def process_command(self, message, log_payload):
         """Routes a command to the appropriate handler method."""
-        user_message = message.content.replace(f'<@{message.client.user.id}>', '').strip()
+        # FIX: Use self.client.user.id to get the bot's user ID
+        user_message = message.content.replace(f'<@{self.client.user.id}>', '').strip()
         parts = user_message[1:].lower().split()
         command = parts[0]
         args = parts[1:]
@@ -107,8 +102,7 @@ class CommandHandler:
             await message.channel.send(f"{message.author.mention} rolls `{expression}` and gets: **{result}**")
             logging.info(f"User rolled '{expression}' with result {result}.", extra=log_payload)
         except (ValueError, TypeError) as e:
-            await message.channel.send(
-                f"I couldn't understand that roll. Please use D&D notation like `1d20` or `2d6+4`.\n*Error: {e}*")
+            await message.channel.send(f"I couldn't understand that roll. Please use D&D notation like `1d20` or `2d6+4`.\n*Error: {e}*")
 
     async def handle_help(self, message, args, log_payload):
         """Displays a help message with all available commands."""
@@ -123,4 +117,3 @@ class CommandHandler:
         """
         await message.channel.send(help_text)
         logging.info("User requested help.", extra=log_payload)
-
