@@ -4,10 +4,6 @@
 # The VM's service account is responsible for fetching secrets.
 
 steps:
-  - name: 'gcr.io/cloud-builders/git'
-    args: ['config', '--global', 'safe.directory', '/opt/apps/discord-bot']
-  # This single step connects to the VM and runs a series of commands
-  # to update and restart the application.
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Connect, Update, and Deploy'
     entrypoint: 'gcloud'
@@ -25,7 +21,6 @@ steps:
   
           # 1. Navigate to the application directory
           cd /opt/apps/discord-bot
-          sudo git config --global --add safe.directory /opt/apps/discord-bot
        
           # 2. Pull the latest code from the specified branch.
           #    This is run as the 'discordbot' user to respect file permissions.
