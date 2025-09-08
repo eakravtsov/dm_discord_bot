@@ -1,7 +1,5 @@
 # --- DMBot.py (Refactored for Compute Engine) ---
-
 import logging
-import asyncio
 from helpers.ConfigurationHelper import setup_logging, load_config, SYSTEM_PROMPT
 from handlers.DatabaseHandler import DatabaseHandler
 from handlers.LLMHandler import LLMHandler
@@ -52,7 +50,7 @@ def main():
         logging.info("All services initialized. Starting the Discord client.")
         # This is a blocking call that runs the bot's event loop.
         # It will run indefinitely until the bot is disconnected or an error occurs.
-        asyncio.run(discord_client.start(config.get("DISCORD_TOKEN")))
+        discord_client.start(config.get("DISCORD_TOKEN"))
     except Exception as e:
         logging.critical(f"An unexpected error occurred while running the bot.", exc_info=e)
     finally:
