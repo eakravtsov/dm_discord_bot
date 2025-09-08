@@ -123,3 +123,14 @@ class GraphHandler:
 
             logging.info(f"Upserted entity '{entity_name}' for user {user_id}.")
 
+    async def delete_user_data(self, user_id: str):
+        """Deletes all nodes and relationships associated with a specific user."""
+        try:
+            async with self.driver.session() as session:
+                # This query finds all nodes for a user, and DETACH DELETE removes them
+                # along with any relationships they have.
+                query = "MATCH (n {userId: $userId}) DETACH DELETE n"
+                await session.run(query, userId=user_id)
+                logging.info(f"Successfully deleted all graph data for user {user_id}.")
+        except Exception as e:
+            logging.error(f"Failed to delete graph data for user {user_id}.", exc_info=e)

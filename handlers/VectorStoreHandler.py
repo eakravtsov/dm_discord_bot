@@ -80,3 +80,15 @@ class VectorStoreHandler:
         except Exception as e:
             logging.error(f"Failed to query vector store for user {user_id}", exc_info=e)
             return []
+
+    async def delete_user_collection(self, user_id: str):
+        """Deletes the entire vector collection for a specific user."""
+        collection_name = f"user_{user_id}"
+        try:
+            self.client.delete_collection(name=collection_name)
+            logging.info(f"Successfully deleted vector collection '{collection_name}' for user {user_id}.")
+        except ValueError:
+            logging.warning(f"Attempted to delete non-existent vector collection '{collection_name}' for user {user_id}.")
+        except Exception as e:
+            logging.error(f"Failed to delete vector collection for user {user_id}.", exc_info=e)
+

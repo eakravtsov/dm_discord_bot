@@ -39,7 +39,7 @@ def roll_dice(expression: str) -> int:
 class CommandHandler:
     """Handles all user commands starting with '!'."""
 
-    def __init__(self, game_manager, client):
+    def __init__(self, game_manager, graph_handler, vector_store_handler, client):
         """
         Initializes the CommandHandler.
         Args:
@@ -47,6 +47,8 @@ class CommandHandler:
             client: The main discord.Client instance.
         """
         self.game_manager = game_manager
+        self.graph_handler = graph_handler
+        self.vector_store_handler = vector_store_handler
         self.client = client
         self.commands = {
             "newgame": self.handle_newgame,
@@ -70,12 +72,27 @@ class CommandHandler:
             await message.channel.send(f"Unknown command: `!{command}`. Type `!help` for a list of available commands.")
 
     async def handle_newgame(self, message, args, log_payload):
-        """Resets the user's game history."""
+        """Resets all of a user's data across all databases."""
         user_id = str(message.author.id)
-        await self.game_manager.reset_history(user_id)
-        await message.channel.send(
-            "The mists clear, and a new adventure begins for you... (Your story has been reset). What do you do?")
-        logging.info("User started a new game.", extra=log_payload)
+        logging.info(f"Initiating full data reset for user {user_id}.", extra=log_payload)
+
+        try:
+            # Step 1: Reset Firestore history
+            await self.game_manager.reset_history(user_id)
+
+            # Step 2: Delete all graph data from Neo4j
+            await self.graph_handler.delete_user_data(user_id)
+
+            # Step 3: Delete the entire vector collection from ChromaDB
+            await self.vector_store_handler.delete_user_collection(user_id)
+
+            await message.channel.send(
+                "The mists clear, and a new adventure begins for you... (Your story and world state have been completely reset). What do you do?")
+            logging.info(f"Full data reset completed for user {user_id}.", extra=log_payload)
+
+        except Exception as e:
+            logging.error(f"An error occurred during the new game process for user {user_id}.", exc_info=e)
+            await message.channel.send("There was an error trying to start a new game. Please try again shortly.")
 
     async def handle_replay(self, message, args, log_payload):
         """Replays the last message from the Dungeon Master."""

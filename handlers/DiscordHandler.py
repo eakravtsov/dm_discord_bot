@@ -16,7 +16,7 @@ class DiscordHandler(discord.Client):
         self.game_manager = game_manager
         self.graph_handler = graph_handler
         self.vector_store_handler = vector_store_handler
-        self.command_handler = CommandHandler(game_manager, self)
+        self.command_handler = CommandHandler(game_manager, graph_handler, vector_store_handler, self)
         logging.info("Discord Bot initialized with all handlers.")
 
     async def on_ready(self):
@@ -61,22 +61,29 @@ class DiscordHandler(discord.Client):
                 for chunk in split_string_by_word_chunks(dm_response, 1900):
                     await message.channel.send(chunk)
 
-                # 5. EXTRACT new facts from the latest turn
-                conversation_chunk = f"Player: {user_message}\nDM: {dm_response}"
-                new_entities = await self.llm.extract_facts(conversation_chunk)
-
-                if new_entities:
-                    for entity in new_entities:
-                        # 6. UPDATE Knowledge Graph
-                        await self.graph_handler.add_or_update_entity(user_id, entity)
-
-                        # 7. UPDATE Search Index (Vector Store)
-                        sentence = self._generate_descriptive_sentence(entity)
-                        await self.vector_store_handler.add_entry(user_id, sentence)
-
             except Exception as e:
-                logging.error(f"An error occurred in RAG workflow for user {user_id}", exc_info=e)
+                logging.error(f"An error occurred in message generation workflow for {user_id}", exc_info=e)
                 await message.channel.send("A strange energy crackles... I need a moment. Please try again.")
+
+        try:
+            # 5. EXTRACT new facts from the latest turn
+            conversation_chunk = f"Player: {user_message}\nDM: {dm_response}"
+            new_entities = await self.llm.extract_facts(conversation_chunk)
+
+            if new_entities:
+                for entity in new_entities:
+                    # 6. UPDATE Knowledge Graph
+                    await self.graph_handler.add_or_update_entity(user_id, entity)
+
+                    # 7. UPDATE Search Index (Vector Store)
+                    sentence = self._generate_descriptive_sentence(entity)
+                    await self.vector_store_handler.add_entry(user_id, sentence)
+
+        except Exception as e:
+            logging.error(f"An error occurred in memory storage workflow for {user_id}", exc_info=e)
+
+
+
 
     def _generate_descriptive_sentence(self, entity: dict) -> str:
         """Flattens a structured entity into a single sentence for embedding."""
