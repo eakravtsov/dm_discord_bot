@@ -12,6 +12,9 @@ steps:
     args:
       - '-c'
       - |
+        # Create a directory for the SSH key within the step's temporary filesystem
+        mkdir -p /root/.ssh
+        
         # Fetch the SSH private key from Secret Manager
         gcloud secrets versions access latest --secret="github-ssh-private-key" --format="get(payload.data)" | tr "_-" "/+" | base64 -d > /root/.ssh/id_ed25519
         
@@ -24,9 +27,6 @@ steps:
         # SSH into the VM and execute the deployment script
         # IMPORTANT: Replace 'your-vm-name' and 'your-vm-zone' with your VM's details
         gcloud compute ssh discord-bot-vm --zone=us-central1-a -- 'sudo /opt/apps/discord-bot/setup_and_run.sh'
-    volumes:
-      - name: 'ssh'
-        path: /root/.ssh
 
 # Allow the build to access the specified secret from Secret Manager.
 availableSecrets:
@@ -34,7 +34,3 @@ availableSecrets:
   - versionName: projects/$PROJECT_ID/secrets/github-ssh-private-key/versions/latest
     env: 'SSH_KEY' # This env var is required by the syntax but not used directly in our script.
 
-
-# --- The required logging option ---
-options:
-  logging: CLOUD_LOGGING_ONLY
