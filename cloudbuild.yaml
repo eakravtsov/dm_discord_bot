@@ -21,8 +21,11 @@ steps:
           # Use a subshell that exits on any error to ensure reliability
           set -e
           
+          
           # 1. Navigate to the application directory
           cd /opt/apps/discord-bot
+        
+          git config --global --add safe.directory /opt/apps/discord-bot
        
           # 2. Pull the latest code from the specified branch.
           #    This is run as the 'discordbot' user to respect file permissions.
