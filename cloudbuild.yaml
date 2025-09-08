@@ -2,7 +2,6 @@
 # This file defines a simple, single-step build process that securely
 # deploys the bot by executing a self-contained script on the VM.
 # The VM's service account is responsible for fetching secrets.
-
 steps:
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Connect, Update, and Deploy'
