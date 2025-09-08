@@ -58,7 +58,7 @@ class CommandHandler:
     async def process_command(self, message, log_payload):
         """Routes a command to the appropriate handler method."""
         # FIX: Use self.client.user.id to get the bot's user ID
-        user_message = message.content.replace(f'<@{self.client.user.id}>', '').strip()
+        user_message = message.content   #.replace(f'<@{self.client.user.id}>', '').strip()
         parts = user_message[1:].lower().split()
         command = parts[0]
         args = parts[1:]
