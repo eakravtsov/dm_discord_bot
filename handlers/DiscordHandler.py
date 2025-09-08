@@ -59,6 +59,7 @@ class DiscordHandler(discord.Client):
         # --- Augmented Generation Phase ---
         await self.game_manager.add_message(user_id, 'user', f"{author.name} says: {message_to_process}")
         history = await self.game_manager.get_history(user_id)
+        logging.info(f"Providing the following context to storytelling model: {context_string}")
         dm_response = await self.llm.generate_response(history, context_string)
         await self.game_manager.add_message(user_id, 'model', dm_response)
 
