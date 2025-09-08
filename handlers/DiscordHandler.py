@@ -14,7 +14,7 @@ class DiscordHandler(discord.Client):
         super().__init__(intents=intents, **options)
         self.llm = llm_handler
         self.game_manager = game_manager
-        self.command_handler = CommandHandler(game_manager)
+        self.command_handler = CommandHandler(game_manager,DiscordHandler)
         logging.info("Discord Bot initialized.")
 
     async def on_ready(self):
