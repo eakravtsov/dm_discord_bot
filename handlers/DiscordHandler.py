@@ -72,7 +72,7 @@ class DiscordHandler(discord.Client):
 
                         # 7. UPDATE Search Index (Vector Store)
                         sentence = self._generate_descriptive_sentence(entity)
-                        await self.vector_store_handler.add_entry(user_id, sentence, entity["name"])
+                        await self.vector_store_handler.add_entry(user_id, sentence)
 
             except Exception as e:
                 logging.error(f"An error occurred in RAG workflow for user {user_id}", exc_info=e)
