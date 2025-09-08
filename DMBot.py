@@ -54,7 +54,7 @@ def main():
     except Exception as e:
         logging.critical(f"An unexpected error occurred while running the bot.", exc_info=e)
     finally:
-        logging.info("Bot has been shut down.") 
+        logging.info("Bot has been shut down.")
 
 if __name__ == "__main__":
     main()
