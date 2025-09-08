@@ -50,6 +50,8 @@ class CommandHandler:
         self.graph_handler = graph_handler
         self.vector_store_handler = vector_store_handler
         self.client = client
+
+        self.pending_confirmations = {}
         self.commands = {
             "newgame": self.handle_newgame,
             "replay": self.handle_replay,
