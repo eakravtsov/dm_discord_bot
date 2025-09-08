@@ -1,4 +1,4 @@
-import discord
+import time
 import logging
 import random
 import re
@@ -60,7 +60,7 @@ class CommandHandler:
     async def process_command(self, message, log_payload):
         """Routes a command to the appropriate handler method."""
         # FIX: Use self.client.user.id to get the bot's user ID
-        user_message = message.content   #.replace(f'<@{self.client.user.id}>', '').strip()
+        user_message = message.content.replace(f'@Dungeon Master Bot', '').strip()
         parts = user_message[1:].lower().split()
         command = parts[0]
         args = parts[1:]
@@ -72,27 +72,58 @@ class CommandHandler:
             await message.channel.send(f"Unknown command: `!{command}`. Type `!help` for a list of available commands.")
 
     async def handle_newgame(self, message, args, log_payload):
-        """Resets all of a user's data across all databases."""
+        """
+        Resets all of a user's data across all databases after a confirmation step.
+        """
         user_id = str(message.author.id)
-        logging.info(f"Initiating full data reset for user {user_id}.", extra=log_payload)
+        CONFIRMATION_TIMEOUT = 30  # 30 seconds to confirm
 
-        try:
-            # Step 1: Reset Firestore history
-            await self.game_manager.reset_history(user_id)
+        # Check if the user is confirming the deletion
+        if args and args[0].lower() == 'confirm':
+            if user_id in self.pending_confirmations:
+                time_since_request = time.time() - self.pending_confirmations[user_id]
 
-            # Step 2: Delete all graph data from Neo4j
-            await self.graph_handler.delete_user_data(user_id)
+                if time_since_request <= CONFIRMATION_TIMEOUT:
+                    logging.info(f"Confirmation received. Initiating full data reset for user {user_id}.",
+                                 extra=log_payload)
 
-            # Step 3: Delete the entire vector collection from ChromaDB
-            await self.vector_store_handler.delete_user_collection(user_id)
+                    try:
+                        # Clear the confirmation *before* starting the deletion
+                        del self.pending_confirmations[user_id]
 
-            await message.channel.send(
-                "The mists clear, and a new adventure begins for you... (Your story and world state have been completely reset). What do you do?")
-            logging.info(f"Full data reset completed for user {user_id}.", extra=log_payload)
+                        # Step 1: Reset Firestore history
+                        await self.game_manager.reset_history(user_id)
 
-        except Exception as e:
-            logging.error(f"An error occurred during the new game process for user {user_id}.", exc_info=e)
-            await message.channel.send("There was an error trying to start a new game. Please try again shortly.")
+                        # Step 2: Delete all graph data from Neo4j
+                        await self.graph_handler.delete_user_data(user_id)
+
+                        # Step 3: Delete the entire vector collection from ChromaDB
+                        await self.vector_store_handler.delete_user_collection(user_id)
+
+                        await message.channel.send(
+                            "The mists clear, and a new adventure begins for you... (Your story and world state have been completely reset). What do you do?")
+                        logging.info(f"Full data reset completed for user {user_id}.", extra=log_payload)
+
+                    except Exception as e:
+                        logging.error(f"An error occurred during the new game process for user {user_id}.", exc_info=e)
+                        await message.channel.send(
+                            "There was an error trying to start a new game. Please try again shortly.")
+                else:
+                    # Confirmation has expired
+                    del self.pending_confirmations[user_id]
+                    await message.channel.send("Confirmation for `!newgame` has expired. Please run the command again.")
+            else:
+                # No pending confirmation found
+                await message.channel.send("You don't have a pending `!newgame` command. Please run `!newgame` first.")
+        else:
+            # Initial !newgame request
+            self.pending_confirmations[user_id] = time.time()
+            warning_message = (
+                "**Are you absolutely sure you want to start a new game?**\n"
+                "This will delete your current story and all world settings - this cannot be undone.\n\n"
+                f"To confirm, please type `!newgame confirm` within {CONFIRMATION_TIMEOUT} seconds."
+            )
+            await message.channel.send(warning_message)
 
     async def handle_replay(self, message, args, log_payload):
         """Replays the last message from the Dungeon Master."""
