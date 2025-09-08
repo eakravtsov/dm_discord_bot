@@ -1,37 +1,53 @@
 # --- cloudbuild.yaml ---
-# This file defines the simple, secure build process. Its only job is to
-# authenticate and then trigger the deployment script on the VM.
+# This file defines a simple, single-step build process that securely
+# deploys the bot by executing a self-contained script on the VM.
 
 steps:
-  # This single step securely fetches the SSH key from Secret Manager,
-  # sets the correct permissions, adds GitHub to the list of known hosts,
-  # and then executes the 'setup_and_run.sh' script on the target VM.
+  # This single step connects to the VM and runs a series of commands
+  # to update and restart the application.
   - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'Connect and Deploy'
-    entrypoint: 'bash'
+    id: 'Connect, Update, and Deploy'
+    entrypoint: 'gcloud'
     args:
-      - '-c'
+      - 'compute'
+      - 'ssh'
+      # --- VM Details from your configuration ---
+      - '--zone=us-central1-c'
+      - 'eakravtsov@discord-bot-vm'
+      # --- Remote Command to Execute on the VM ---
+      - '--command'
       - |
-        # Create a directory for the SSH key within the step's temporary filesystem
-        mkdir -p /root/.ssh
-        
-        # Fetch the SSH private key from Secret Manager
-        gcloud secrets versions access latest --secret="github-ssh-private-key" --format="get(payload.data)" | tr "_-" "/+" | base64 -d > /root/.ssh/id_ed25519
-        
-        # Set required key permissions for SSH
-        chmod 600 /root/.ssh/id_ed25519
-        
-        # Add GitHub to known_hosts to prevent interactive prompts, which break automation
-        ssh-keyscan -t rsa github.com >> /root/.ssh/known_hosts
-        
-        # SSH into the VM and execute the deployment script
-        # IMPORTANT: Replace 'your-vm-name' and 'your-vm-zone' with your VM's details
-        gcloud compute ssh discord-bot-vm --zone=us-central1-c -- 'sudo /opt/apps/discord-bot/setup_and_run.sh'
+          # Use a subshell that exits on any error to ensure reliability
+          set -e
+          
+          # 1. Navigate to the application directory
+          cd /opt/apps/discord-bot
+          
+          # 2. Fetch secrets required by the application and create the .env file.
+          #    This ensures the bot always has the latest credentials on restart.
+          echo "DISCORD_TOKEN=$(gcloud secrets versions access latest --secret="DISCORD_TOKEN")" > .env
+          echo "GOOGLE_API_KEY=$(gcloud secrets versions access latest --secret="GOOGLE_API_KEY")" >> .env
+          echo "GCP_PROJECT_ID=$(gcloud secrets versions access latest --secret="GCP_PROJECT_ID")" >> .env
+          
+          # 3. Pull the latest code from the specified branch.
+          #    This is run as the 'discordbot' user to respect file permissions.
+          sudo -u discordbot git fetch --all
+          sudo -u discordbot git reset --hard origin/computeEngineVersion
+          
+          # 4. Ensure all files are owned by the application user after git operations.
+          chown -R discordbot:discordbot .
+          
+          # 5. Install/update Python dependencies.
+          sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt
+          
+          # 6. Restart the systemd service to apply all changes.
+          systemctl restart discord-bot.service
 
-# Allow the build to access the specified secret from Secret Manager.
+# Grant the Cloud Build service account the necessary permissions to access
+# the application's secrets from Secret Manager.
 availableSecrets:
   secretManager:
-  - versionName: projects/$PROJECT_ID/secrets/github-ssh-private-key/versions/latest
+  - versionName: projects/$PROJECT_ID/secrets/DISCORD_TOKEN/versions/latest
+  - versionName: projects/$PROJECT_ID/secrets/GOOGLE_API_KEY/versions/latest
+  - versionName: projects/$PROJECT_ID/secrets/GCP_PROJECT_ID/versions/latest
 
-options:
-  logging: CLOUD_LOGGING_ONLY
