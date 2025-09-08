@@ -60,6 +60,10 @@ def load_config():
     config = {
         "DISCORD_TOKEN": os.getenv('DISCORD_TOKEN'),
         "GOOGLE_API_KEY": os.getenv('GOOGLE_API_KEY'),
-        "GCP_PROJECT_ID": os.getenv('GCP_PROJECT_ID')
+        "GCP_PROJECT_ID": os.getenv('GCP_PROJECT_ID'),
+        "NEO4J_URI": os.getenv('NEO4J_URI'),
+        "NEO4J_USER": os.getenv('NEO4J_USER'),
+        "NEO4J_PASSWORD": os.getenv('NEO4J_PASSWORD'),
+        "VECTOR_DB_PATH": os.getenv('VECTOR_DB_PATH')
     }
     return config

@@ -1,61 +1,70 @@
-# --- DMBot.py (Refactored for Compute Engine) ---
 import logging
 import asyncio
 from helpers.ConfigurationHelper import setup_logging, load_config, SYSTEM_PROMPT
 from handlers.DatabaseHandler import DatabaseHandler
 from handlers.LLMHandler import LLMHandler
 from handlers.DiscordHandler import DiscordHandler
+from handlers.GraphHandler import GraphHandler
+from handlers.VectorStoreHandler import VectorStoreHandler
 
-# --- Setup Logging ---
 setup_logging()
 
+
 def main():
-    """
-    Initializes and runs the Discord bot application.
-    """
+    """Initializes and runs the Discord bot application."""
     logging.info("Starting Dungeon Master Bot...")
 
-    # --- Load and Validate Configuration ---
     config = load_config()
-    if not all([config.get("DISCORD_TOKEN"), config.get("GOOGLE_API_KEY"), config.get("GCP_PROJECT_ID")]):
-        logging.critical("One or more critical environment variables (DISCORD_TOKEN, GOOGLE_API_KEY, GCP_PROJECT_ID) are missing. Shutting down.")
-        return  # Exit the application
+    required_vars = [
+        "DISCORD_TOKEN", "GOOGLE_API_KEY", "GCP_PROJECT_ID",
+        "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "VECTOR_DB_PATH"
+    ]
+    if not all(config.get(var) for var in required_vars):
+        logging.critical("One or more critical environment variables are missing. Shutting down.")
+        return
 
     logging.info("Configuration loaded successfully.")
-    # --- Initialize Handlers ---
+
+    graph_handler = None  # Initialize to None for the finally block
     try:
-        # Database handler is critical, initialize it first.
-        db_handler = DatabaseHandler(
-            project_id=config.get("GCP_PROJECT_ID"),
-            system_prompt=SYSTEM_PROMPT
-        )
+        # --- Initialize Handlers ---
+        db_handler = DatabaseHandler(project_id=config["GCP_PROJECT_ID"], system_prompt=SYSTEM_PROMPT)
         if not db_handler.is_initialized():
             logging.critical("Firestore client could not be initialized. Shutting down.")
-            return # Exit the application
+            return
 
-        # Initialize the LLM handler.
-        llm_handler = LLMHandler(api_key=config.get("GOOGLE_API_KEY"))
-
-        # Connect the LLM handler to the database handler for summarization.
+        llm_handler = LLMHandler(api_key=config["GOOGLE_API_KEY"])
         db_handler.set_llm_handler(llm_handler)
 
-        # Initialize the Discord client, passing it the other handlers.
-        discord_client = DiscordHandler(llm_handler=llm_handler, game_manager=db_handler)
+        graph_handler = GraphHandler(
+            uri=config["NEO4J_URI"],
+            user=config["NEO4J_USER"],
+            password=config["NEO4J_PASSWORD"]
+        )
 
-    except Exception as e:
-        logging.critical(f"A fatal error occurred during service initialization.", exc_info=e)
-        return # Exit the application
+        vector_store_handler = VectorStoreHandler(
+            embedding_model=llm_handler,
+            db_path=config["VECTOR_DB_PATH"]
+        )
 
-    # --- Run the Bot ---
-    try:
+        discord_client = DiscordHandler(
+            llm_handler=llm_handler,
+            game_manager=db_handler,
+            graph_handler=graph_handler,
+            vector_store_handler=vector_store_handler
+        )
+
+        # --- Run the Bot ---
         logging.info("All services initialized. Starting the Discord client.")
-        # This is a blocking call that runs the bot's event loop.
-        # It will run indefinitely until the bot is disconnected or an error occurs.
-        asyncio.run(discord_client.start(config.get("DISCORD_TOKEN")))
+        asyncio.run(discord_client.start(config["DISCORD_TOKEN"]))
+
     except Exception as e:
-        logging.critical(f"An unexpected error occurred while running the bot.", exc_info=e)
+        logging.critical("A fatal error occurred during service initialization or runtime.", exc_info=e)
     finally:
+        if graph_handler:
+            asyncio.run(graph_handler.close())
         logging.info("Bot has been shut down.")
+
 
 if __name__ == "__main__":
     main()
