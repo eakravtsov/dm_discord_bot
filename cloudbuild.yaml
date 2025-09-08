@@ -1,6 +1,7 @@
 # --- cloudbuild.yaml ---
 # This file defines a simple, single-step build process that securely
 # deploys the bot by executing a self-contained script on the VM.
+# The VM's service account is responsible for fetching secrets.
 
 steps:
   # This single step connects to the VM and runs a series of commands
@@ -24,7 +25,7 @@ steps:
           cd /opt/apps/discord-bot
           
           # 2. Fetch secrets required by the application and create the .env file.
-          #    This ensures the bot always has the latest credentials on restart.
+          #    This command uses the VM's service account permissions.
           echo "DISCORD_TOKEN=$(gcloud secrets versions access latest --secret="DISCORD_TOKEN")" > .env
           echo "GOOGLE_API_KEY=$(gcloud secrets versions access latest --secret="GOOGLE_API_KEY")" >> .env
           echo "GCP_PROJECT_ID=$(gcloud secrets versions access latest --secret="GCP_PROJECT_ID")" >> .env
@@ -35,21 +36,14 @@ steps:
           sudo -u discordbot git reset --hard origin/computeEngineVersion
           
           # 4. Ensure all files are owned by the application user after git operations.
-          chown -R discordbot:discordbot .
+          sudo chown -R discordbot:discordbot .
           
           # 5. Install/update Python dependencies.
           sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt
           
           # 6. Restart the systemd service to apply all changes.
-          systemctl restart discord-bot.service
+          sudo systemctl restart discord-bot.service
 
-# Grant the Cloud Build service account the necessary permissions to access
-# the application's secrets from Secret Manager.
-availableSecrets:
-  secretManager:
-  - versionName: projects/$PROJECT_ID/secrets/DISCORD_TOKEN/versions/latest
-  - versionName: projects/$PROJECT_ID/secrets/GOOGLE_API_KEY/versions/latest
-  - versionName: projects/$PROJECT_ID/secrets/GCP_PROJECT_ID/versions/latest
 
 options:
   logging: CLOUD_LOGGING_ONLY
