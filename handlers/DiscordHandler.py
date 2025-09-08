@@ -64,7 +64,7 @@ class DiscordHandler(discord.Client):
 
         # --- Determine if UI is needed ---
         view_to_send = None
-        roll_keywords = ["make a roll", "roll a", "make a check", "roll for"]
+        roll_keywords = ["make a", "roll a", "roll for"]
         if any(keyword in dm_response.lower() for keyword in roll_keywords):
             view_to_send = DiceRollView(author=author)
 
