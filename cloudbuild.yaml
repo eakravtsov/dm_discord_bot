@@ -23,25 +23,19 @@ steps:
           
           # 1. Navigate to the application directory
           cd /opt/apps/discord-bot
-          
-          # 2. Fetch secrets required by the application and create the .env file.
-          #    This command uses the VM's service account permissions.
-          echo "DISCORD_TOKEN=$(gcloud secrets versions access latest --secret="DISCORD_TOKEN")" > .env
-          echo "GOOGLE_API_KEY=$(gcloud secrets versions access latest --secret="GOOGLE_API_KEY")" >> .env
-          echo "GCP_PROJECT_ID=$(gcloud secrets versions access latest --secret="GCP_PROJECT_ID")" >> .env
-          
-          # 3. Pull the latest code from the specified branch.
+       
+          # 2. Pull the latest code from the specified branch.
           #    This is run as the 'discordbot' user to respect file permissions.
           sudo -u discordbot git fetch --all
           sudo -u discordbot git reset --hard origin/computeEngineVersion
           
-          # 4. Ensure all files are owned by the application user after git operations.
+          # 3. Ensure all files are owned by the application user after git operations.
           sudo chown -R discordbot:discordbot .
           
-          # 5. Install/update Python dependencies.
+          # 4. Install/update Python dependencies.
           sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt
           
-          # 6. Restart the systemd service to apply all changes.
+          # 5. Restart the systemd service to apply all changes.
           sudo systemctl restart discord-bot.service
 
 
