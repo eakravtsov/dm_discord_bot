@@ -1,0 +1,39 @@
+# --- cloudbuild.yaml ---
+# This file defines a simple, single-step build process that securely
+# deploys the bot by executing a self-contained script on the VM.
+
+steps:
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'Connect, Update, and Deploy'
+    entrypoint: 'gcloud'
+    args:
+      - 'compute'
+      - 'ssh'
+      # --- VM Details from your configuration ---
+      - '--zone=us-central1-c'
+      - 'eakravtsov@discord-bot-vm'
+      # --- Remote Command to Execute on the VM ---
+      - '--command'
+      - |
+          # Use a subshell that exits on any error to ensure reliability
+          set -e
+  
+          # 1. Navigate to the application directory
+          cd /opt/apps/discord-bot
+       
+          # 2. Pull the latest code from the specified branch.
+          #    This is run as the 'discordbot' user to respect file permissions.
+          sudo -u discordbot git fetch --all
+          sudo -u discordbot git reset --hard origin/computeEngineVersion
+          
+          # 3. Ensure all files are owned by the application user after git operations.
+          sudo chown -R discordbot:discordbot .
+          
+          # 4. Install/update Python dependencies.
+          sudo -u discordbot /opt/apps/discord-bot/venv/bin/pip install -r requirements.txt
+          
+          # 5. Restart the systemd service to apply all changes.
+          sudo systemctl restart discord-bot.service
+
+options:
+  logging: CLOUD_LOGGING_ONLY

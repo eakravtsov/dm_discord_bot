@@ -1,101 +1,113 @@
 import discord
 import logging
-
-from click.shell_completion import split_arg_string
-
+from handlers.CommandHandler import CommandHandler, DiceRollView
 
 class DiscordHandler(discord.Client):
-    """The main Discord bot class that ties everything together."""
 
-    def __init__(self, llm_handler, game_manager, **options):
+    def __init__(self, llm_handler, game_manager, graph_handler, vector_store_handler, **options):
         intents = discord.Intents.default()
         intents.messages = True
         intents.message_content = True
         super().__init__(intents=intents, **options)
         self.llm = llm_handler
         self.game_manager = game_manager
+        self.graph_handler = graph_handler
+        self.vector_store_handler = vector_store_handler
+        self.command_handler = CommandHandler(game_manager, graph_handler, vector_store_handler, self)
         logging.info("Discord Bot initialized.")
 
     async def on_ready(self):
         logging.info(f'Logged in as {self.user.name} ({self.user.id})')
         logging.info('The DM is ready to begin the adventure!')
 
+    async def _run_rag_cycle(self, user_id: str, author: discord.User, message_to_process: str):
+        # --- Read/Retrieval Phase ---
+        relevant_entity_ids = await self.vector_store_handler.query(user_id, message_to_process)
+        context_string = ""
+        if relevant_entity_ids:
+            context_items = []
+            for entity_id in relevant_entity_ids:
+                context = await self.graph_handler.get_entity_context(user_id, entity_id)
+                if context:
+                    context_items.append(context)
+            if context_items:
+                context_string = "\n".join(context_items)
+
+        # --- Augmented Generation Phase ---
+        await self.game_manager.add_message(user_id, 'user', f"{author.name} says: {message_to_process}")
+        history = await self.game_manager.get_history(user_id)
+        dm_response = await self.llm.generate_response(history, context_string)
+
+        await self.game_manager.add_message(user_id, 'model', dm_response)
+
+        # --- Determine if UI is needed ---
+        view_to_send = None
+        roll_keywords = ["make a roll", "roll a", "make a check", "roll for"]
+        if any(keyword in dm_response.lower() for keyword in roll_keywords):
+            view_to_send = DiceRollView(author=author)
+
+        return dm_response, view_to_send
+
     async def on_message(self, message):
         if message.author == self.user:
             return
-        if not self.user.mentioned_in(message) and not message.content.startswith('!'):
+
+        user_message_raw = message.content
+        if not self.user.mentioned_in(message) and not user_message_raw.strip().startswith('!'):
             return
 
         user_id = str(message.author.id)
-        user_message = message.content.replace(f'<@{self.user.id}>', '').strip()
+        message_to_process = user_message_raw.replace(f'<@{self.user.id}>', '').strip()
 
-        log_payload = {
-            "discord_user": message.author.name,
-            "user_id": user_id,
-            "message_length": len(user_message),
-        }
-
-        if user_message.lower() == '!newgame':
-            await self.game_manager.reset_history(user_id)
-            await message.channel.send(
-                "The mists clear, and a new adventure begins for you... (Your story has been reset). What do you do?")
-            logging.info(f"User started a new game.", extra=log_payload)
+        if message_to_process.startswith('!'):
+            log_payload = {"discord_user": message.author.name, "user_id": user_id}
+            await self.command_handler.process_command(message, log_payload)
             return
 
-        # ... inside on_message method in DiscordHandler.py
+        try:
+            while message_to_process:
+                dm_response, view_to_send = None, None
 
-        if user_message.lower() == '!replay':
-            history = await self.game_manager.get_history(user_id)
+                async with message.channel.typing():
+                    dm_response, view_to_send = await self._run_rag_cycle(user_id, message.author, message_to_process)
 
-            # Search backwards for the last message from the 'model' (the DM)
-            last_dm_message = None
-            for message_entry in reversed(history):
-                if message_entry.get('role') == 'model':
-                    # Extract the actual text from the 'parts' list
-                    last_dm_message = message_entry.get('parts', [None])[0]
-                    break  # Stop after finding the first one
+                if dm_response:
+                    chunks = split_string_by_word_chunks(dm_response, 1900)
+                    for i, chunk in enumerate(chunks):
+                        if i == len(chunks) - 1:
+                            await message.channel.send(chunk, view=view_to_send)
+                        else:
+                            await message.channel.send(chunk)
 
-            if last_dm_message:
-                replayed_message = f"*(Replaying last message)*\n>>> {last_dm_message}"
-                await message.channel.send(replayed_message)
-            else:
-                await message.channel.send("There are no messages from the DM to replay yet!")
-            return  # Make sure to return after handling the command
+                if view_to_send:
+                    await view_to_send.interaction_complete.wait()
+                    message_to_process = view_to_send.roll_result_message
+                else:
+                    message_to_process = None
 
-        logging.info(f"Received message: '{user_message}'", extra=log_payload)
-
-        async with message.channel.typing():
-            try:
-                await self.game_manager.add_message(user_id, 'user', f"{message.author.name} says: {user_message}")
-                history = await self.game_manager.get_history(user_id)
-                dm_response = await self.llm.generate_response(history)
-                await self.game_manager.add_message(user_id, 'model', dm_response)
-                chunks = split_string_by_word_chunks(dm_response, 1900)
-                for chunk in chunks:
-                    await message.channel.send(chunk)
-            except Exception as e:
-                logging.error(f"An error occurred while processing a message for user {user_id}", exc_info=e)
-                await message.channel.send("A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
+        except Exception as e:
+            logging.error(f"An error occurred in main workflow for user {user_id}", exc_info=e)
+            await message.channel.send(
+                "A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
 
 
+# ... (split_string_by_word_chunks function remains the same) ...
 def split_string_by_word_chunks(text, max_length):
-    words = text.split()  # Split the string into words
+    words = text.split()
     chunks = []
     current_chunk = ""
 
     for word in words:
-        # Check if adding the current word (plus a space if needed) exceeds max_length
         if current_chunk and len(current_chunk) + 1 + len(word) > max_length:
-            chunks.append(current_chunk.strip())  # Add the completed chunk
-            current_chunk = word  # Start a new chunk with the current word
+            chunks.append(current_chunk.strip())
+            current_chunk = word
         else:
             if current_chunk:
                 current_chunk += " " + word
             else:
                 current_chunk = word
 
-    if current_chunk:  # Add any remaining part of the string as a chunk
+    if current_chunk:
         chunks.append(current_chunk.strip())
 
     return chunks
-
