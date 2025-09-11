@@ -1,13 +1,8 @@
 import discord
 import logging
-import re
-import asyncio
-
 from handlers.CommandHandler import CommandHandler, DiceRollView
 
-
 class DiscordHandler(discord.Client):
-    """The main Discord bot class that ties everything together."""
 
     def __init__(self, llm_handler, game_manager, graph_handler, vector_store_handler, **options):
         intents = discord.Intents.default()
