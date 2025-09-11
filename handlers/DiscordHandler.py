@@ -1,8 +1,11 @@
-import discord
 import logging
-from handlers.CommandHandler import CommandHandler, DiceRollView
+
+import discord
+from handlers.CommandHandler import CommandHandler
+
 
 class DiscordHandler(discord.Client):
+    """The main Discord bot class that ties everything together."""
 
     def __init__(self, llm_handler, game_manager, graph_handler, vector_store_handler, **options):
         intents = discord.Intents.default()
@@ -20,34 +23,6 @@ class DiscordHandler(discord.Client):
         logging.info(f'Logged in as {self.user.name} ({self.user.id})')
         logging.info('The DM is ready to begin the adventure!')
 
-    async def _run_rag_cycle(self, user_id: str, author: discord.User, message_to_process: str):
-        # --- Read/Retrieval Phase ---
-        relevant_entity_ids = await self.vector_store_handler.query(user_id, message_to_process)
-        context_string = ""
-        if relevant_entity_ids:
-            context_items = []
-            for entity_id in relevant_entity_ids:
-                context = await self.graph_handler.get_entity_context(user_id, entity_id)
-                if context:
-                    context_items.append(context)
-            if context_items:
-                context_string = "\n".join(context_items)
-
-        # --- Augmented Generation Phase ---
-        await self.game_manager.add_message(user_id, 'user', f"{author.name} says: {message_to_process}")
-        history = await self.game_manager.get_history(user_id)
-        dm_response = await self.llm.generate_response(history, context_string)
-
-        await self.game_manager.add_message(user_id, 'model', dm_response)
-
-        # --- Determine if UI is needed ---
-        view_to_send = None
-        roll_keywords = ["make a roll", "roll a", "make a check", "roll for"]
-        if any(keyword in dm_response.lower() for keyword in roll_keywords):
-            view_to_send = DiceRollView(author=author)
-
-        return dm_response, view_to_send
-
     async def on_message(self, message):
         if message.author == self.user:
             return
@@ -57,33 +32,51 @@ class DiscordHandler(discord.Client):
             return
 
         user_id = str(message.author.id)
-        message_to_process = user_message_raw.replace(f'<@{self.user.id}>', '').strip()
+        user_message = user_message_raw.replace(f'<@{self.user.id}>', '').strip()
 
-        if message_to_process.startswith('!'):
-            log_payload = {"discord_user": message.author.name, "user_id": user_id}
+        log_payload = {
+            "discord_user": message.author.name,
+            "user_id": user_id,
+            "message_length": len(user_message),
+        }
+
+        if user_message.startswith('!'):
             await self.command_handler.process_command(message, log_payload)
             return
 
+        logging.info(f"Processing message: '{user_message}'", extra=log_payload)
+
         try:
-            while message_to_process:
-                dm_response, view_to_send = None, None
+            # The typing indicator now wraps only the generation phase.
+            async with message.channel.typing():
+                # --- Read/Retrieval Phase ---
+                relevant_entity_ids = await self.vector_store_handler.query(user_id, user_message)
+                context_string = ""
+                if relevant_entity_ids:
+                    context_items = []
+                    for entity_id in relevant_entity_ids:
+                        context = await self.graph_handler.get_entity_context(user_id, entity_id)
+                        if context:
+                            context_items.append(context)
+                    if context_items:
+                        context_string = "\n".join(context_items)
 
-                async with message.channel.typing():
-                    dm_response, view_to_send = await self._run_rag_cycle(user_id, message.author, message_to_process)
+                # --- Augmented Generation Phase ---
+                await self.game_manager.add_message(user_id, 'user', f"{message.author.name} says: {user_message}")
+                history = await self.game_manager.get_history(user_id)
+                dm_response = await self.llm.generate_response(history, context_string)
 
-                if dm_response:
-                    chunks = split_string_by_word_chunks(dm_response, 1900)
-                    for i, chunk in enumerate(chunks):
-                        if i == len(chunks) - 1:
-                            await message.channel.send(chunk, view=view_to_send)
-                        else:
-                            await message.channel.send(chunk)
+                # The memory update is triggered inside add_message if the history is full
+                await self.game_manager.add_message(user_id, 'model', dm_response)
 
-                if view_to_send:
-                    await view_to_send.interaction_complete.wait()
-                    message_to_process = view_to_send.roll_result_message
-                else:
-                    message_to_process = None
+            # --- Send Response Phase (Typing indicator is now off) ---
+            if dm_response:
+                chunks = split_string_by_word_chunks(dm_response, 1900)
+                for chunk in chunks:
+                    await message.channel.send(chunk)
+
+            # The "Write/Memory Phase" is now handled periodically by the DatabaseHandler,
+            # so we no longer need the fact extraction logic in this real-time loop.
 
         except Exception as e:
             logging.error(f"An error occurred in main workflow for user {user_id}", exc_info=e)
@@ -91,7 +84,8 @@ class DiscordHandler(discord.Client):
                 "A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
 
 
-# ... (split_string_by_word_chunks function remains the same) ...
+# TODO: Make this better
+# Temporary hack workaround to get around Discord's characters-per-message limits.
 def split_string_by_word_chunks(text, max_length):
     words = text.split()
     chunks = []

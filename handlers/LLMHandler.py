@@ -1,8 +1,8 @@
-import google.generativeai as genai
 import logging
 import json
-from google.generativeai.types import GenerationConfig
 
+import google.generativeai as genai
+from google.generativeai.types import GenerationConfig
 
 class LLMHandler:
     """Handles interactions with the Google Gemini models, including embeddings and world state extraction."""
@@ -44,7 +44,7 @@ class LLMHandler:
             return response.text
         except Exception as e:
             logging.error("An error occurred while generating the LLM response.", exc_info=e)
-            return "The world seems to shimmer and fade for a moment. I... I lost my train of thought. Can you repeat that?"
+            return "The world seems to shimmer and fade for a moment. I lost my train of thought. Can you repeat that?"
 
     async def generate_embedding(self, text: str) -> list[float]:
         """Generates a vector embedding for a given string of text."""
@@ -135,9 +135,8 @@ class LLMHandler:
             if isinstance(entities, list):
                 logging.info(f"Successfully extracted {len(entities)} entities from history chunk.")
                 return entities
-            else:
-                logging.warning("LLM returned 'entities' but it was not a list.")
-                return []
+            logging.warning("LLM returned 'entities' but it was not a list.")
+            return []
         except (json.JSONDecodeError, AttributeError) as e:
             logging.error(f"Failed to parse JSON world state from LLM response: {response.text}", exc_info=e)
             return []

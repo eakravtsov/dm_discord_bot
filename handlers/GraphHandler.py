@@ -4,7 +4,6 @@ from typing import Optional
 
 from neo4j import AsyncGraphDatabase
 
-
 class GraphHandler:
     """Manages all interactions with the Neo4j graph database."""
 
@@ -81,7 +80,6 @@ class GraphHandler:
             return
 
         async with self.driver.session() as session:
-            # DETACH DELETE removes nodes and their relationships
             query = "MATCH (n {userId: $userId}) DETACH DELETE n"
             await session.run(query, userId=user_id)
             logging.info(f"Deleted all graph data for user {user_id}.")
