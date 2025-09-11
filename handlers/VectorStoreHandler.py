@@ -1,7 +1,8 @@
-import chromadb
 import logging
-from google.api_core.exceptions import GoogleAPICallError
 from typing import List
+
+import chromadb
+from google.api_core.exceptions import GoogleAPICallError
 
 
 class VectorStoreHandler:

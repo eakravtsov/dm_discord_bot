@@ -4,7 +4,6 @@ from typing import Optional
 
 from neo4j import AsyncGraphDatabase
 
-
 class GraphHandler:
     """Manages all interactions with the Neo4j graph database."""
 

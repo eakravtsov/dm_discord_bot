@@ -1,77 +1,8 @@
-import discord
 import logging
 import random
 import re
 import time
-import asyncio
 
-
-# --- Interactive UI Component for Dice Rolling ---
-
-class DiceRollView(discord.ui.View):
-    """
-    An interactive view that waits for a button click, stores the result,
-    and signals an event to notify the main application loop.
-    """
-
-    def __init__(self, author: discord.User, timeout=60.0):
-        super().__init__(timeout=timeout)
-        self.author = author
-        self.roll_result_message = None
-        self.interaction_complete = asyncio.Event()
-
-    # This check ensures that only the player who was prompted can click the buttons.
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author.id:
-            await interaction.response.send_message("This is not your roll to make!", ephemeral=True)
-            return False
-        return True
-
-    async def disable_all_buttons(self):
-        """Disables all buttons in the view after one is clicked."""
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
-
-    async def on_timeout(self):
-        """Called when the view times out (e.g., 60 seconds)."""
-        await self.disable_all_buttons()
-        # Ensure the interaction_complete event is set to unblock the handler
-        self.interaction_complete.set()
-
-    async def handle_roll(self, interaction: discord.Interaction, result_message: str):
-        """A helper to handle the common logic for a roll button."""
-        self.roll_result_message = f"[{self.author.name} rolled: {result_message}]"
-
-        await self.disable_all_buttons()
-        await interaction.response.edit_message(view=self)
-
-        await interaction.followup.send(f"{self.author.mention} rolls and gets: **{result_message}**")
-
-        self.interaction_complete.set()
-        self.stop()
-
-    @discord.ui.button(label="Roll d20", style=discord.ButtonStyle.primary, custom_id="roll_d20")
-    async def roll_d20(self, interaction: discord.Interaction, button: discord.ui.Button):
-        result = random.randint(1, 20)
-        await self.handle_roll(interaction, f"{result}")
-
-    @discord.ui.button(label="Advantage", style=discord.ButtonStyle.green, custom_id="roll_advantage")
-    async def roll_advantage(self, interaction: discord.Interaction, button: discord.ui.Button):
-        roll1 = random.randint(1, 20)
-        roll2 = random.randint(1, 20)
-        result = max(roll1, roll2)
-        await self.handle_roll(interaction, f"{result} (with advantage from {roll1}, {roll2})")
-
-    @discord.ui.button(label="Disadvantage", style=discord.ButtonStyle.red, custom_id="roll_disadvantage")
-    async def roll_disadvantage(self, interaction: discord.Interaction, button: discord.ui.Button):
-        roll1 = random.randint(1, 20)
-        roll2 = random.randint(1, 20)
-        result = min(roll1, roll2)
-        await self.handle_roll(interaction, f"{result} (with disadvantage from {roll1}, {roll2})")
-
-
-# --- Dice Rolling Function ---
 
 def roll_dice(expression: str) -> int:
     """Rolls dice based on a D&D-style string expression."""
@@ -133,8 +64,7 @@ class CommandHandler:
         else:
             await message.channel.send(f"Unknown command: `!{command}`. Type `!help` for a list of available commands.")
 
-
-    #TODO: Simplify this method
+    #TODO Simplify this method
     async def handle_newgame(self, message, args, log_payload):
         """
         Resets all of a user's data across all databases after a confirmation step.
@@ -150,6 +80,7 @@ class CommandHandler:
                              extra=log_payload)
 
                 try:
+                    # Each handler is responsible for its own data.
                     await self.game_manager.reset_history(user_id)
                     await self.graph_handler.delete_user_data(user_id)
                     await self.vector_store_handler.delete_user_collection(user_id)
@@ -177,6 +108,7 @@ class CommandHandler:
             await message.channel.send(warning_message)
 
     async def handle_replay(self, message, args, log_payload):
+        """Replays the last message from the Dungeon Master."""
         user_id = str(message.author.id)
         history = await self.game_manager.get_history(user_id)
         last_dm_message = next((m.get('parts', [None])[0] for m in reversed(history) if m.get('role') == 'model'), None)
@@ -189,6 +121,7 @@ class CommandHandler:
         logging.info("User replayed last message.", extra=log_payload)
 
     async def handle_roll(self, message, args, log_payload):
+        """Rolls dice based on D&D notation."""
         if not args:
             await message.channel.send("Please provide a dice expression to roll, like `!roll 1d20+3`.")
             return
@@ -197,12 +130,13 @@ class CommandHandler:
         try:
             result = roll_dice(expression)
             await message.channel.send(f"{message.author.mention} rolls `{expression}` and gets: **{result}**")
-            logging.info(f"User rolled '{expression}' with result {result}.", extra=log_payload)
+            logging.info(f"User rolled '{expression}' with result {result}.\"", extra=log_payload)
         except (ValueError, TypeError) as e:
             await message.channel.send(
                 f"I couldn't understand that roll. Please use D&D notation like `1d20` or `2d6+4`.\n*Error: {e}*")
 
     async def handle_help(self, message, args, log_payload):
+        """Displays a help message with all available commands."""
         help_text = """
         **Available Commands:**
         `!newgame` - Resets your current adventure and starts a new one. Requires confirmation.
@@ -214,4 +148,3 @@ class CommandHandler:
         """
         await message.channel.send(help_text)
         logging.info("User requested help.", extra=log_payload)
-

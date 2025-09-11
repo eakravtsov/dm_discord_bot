@@ -1,5 +1,8 @@
 import os
 import logging
+
+from dotenv import load_dotenv
+
 from google.cloud import logging as cloud_logging
 from google.cloud.logging.handlers import CloudLoggingHandler
 
@@ -52,7 +55,6 @@ def load_config():
     For local development, it loads from a .env file.
     """
     try:
-        from dotenv import load_dotenv
         load_dotenv()
         logging.info("Loaded environment variables from .env file for local development.")
     except ImportError:
