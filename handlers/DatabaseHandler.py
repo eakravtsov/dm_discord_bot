@@ -33,7 +33,6 @@ class DatabaseHandler:
             self.db = None
 
     def set_handlers(self, llm_handler, graph_handler, vector_store_handler):
-        """Sets the other handlers needed for world-state updates."""
         self.llm_handler = llm_handler
         self.graph_handler = graph_handler
         self.vector_store_handler = vector_store_handler

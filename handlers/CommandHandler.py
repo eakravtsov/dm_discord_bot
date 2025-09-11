@@ -6,7 +6,7 @@ import time
 import asyncio
 
 
-# --- Interactive UI Component for Dice Rolling (Refactored for Closed-Loop Interaction) ---
+# --- Interactive UI Component for Dice Rolling ---
 
 class DiceRollView(discord.ui.View):
     """
@@ -43,14 +43,11 @@ class DiceRollView(discord.ui.View):
         """A helper to handle the common logic for a roll button."""
         self.roll_result_message = f"[{self.author.name} rolled: {result_message}]"
 
-        # Disable buttons and update the original message
         await self.disable_all_buttons()
         await interaction.response.edit_message(view=self)
 
-        # Send a public message showing the roll result
         await interaction.followup.send(f"{self.author.mention} rolls and gets: **{result_message}**")
 
-        # Signal that the interaction is done and unblock the main handler
         self.interaction_complete.set()
         self.stop()
 
@@ -74,9 +71,10 @@ class DiceRollView(discord.ui.View):
         await self.handle_roll(interaction, f"{result} (with disadvantage from {roll1}, {roll2})")
 
 
-# --- Existing Code (Unchanged) ---
+# --- Dice Rolling Function ---
+
 def roll_dice(expression: str) -> int:
-    # ... (rest of the function is the same)
+    """Rolls dice based on a D&D-style string expression."""
     if not isinstance(expression, str):
         raise TypeError("Expression must be a string.")
 
@@ -106,8 +104,10 @@ def roll_dice(expression: str) -> int:
 
 
 class CommandHandler:
-    # ... (rest of the class is the same)
+    """Handles all user commands starting with '!'."""
+
     def __init__(self, game_manager, graph_handler, vector_store_handler, client):
+        """Initializes the CommandHandler with all necessary data handlers."""
         self.game_manager = game_manager
         self.graph_handler = graph_handler
         self.vector_store_handler = vector_store_handler
@@ -121,6 +121,7 @@ class CommandHandler:
         }
 
     async def process_command(self, message, log_payload):
+        """Routes a command to the appropriate handler method."""
         user_message = message.content
         parts = user_message[1:].lower().split()
         command = parts[0]
@@ -132,42 +133,40 @@ class CommandHandler:
         else:
             await message.channel.send(f"Unknown command: `!{command}`. Type `!help` for a list of available commands.")
 
+
+    #TODO: Simplify this method
     async def handle_newgame(self, message, args, log_payload):
+        """
+        Resets all of a user's data across all databases after a confirmation step.
+        """
         user_id = str(message.author.id)
         CONFIRMATION_TIMEOUT = 30
 
         if args and args[0].lower() == 'confirm':
-            if user_id in self.pending_confirmations:
-                time_since_request = time.time() - self.pending_confirmations[user_id]
+            if user_id in self.pending_confirmations and (
+                    time.time() - self.pending_confirmations[user_id]) <= CONFIRMATION_TIMEOUT:
+                del self.pending_confirmations[user_id]
+                logging.info(f"Confirmation received. Initiating full data reset for user {user_id}.",
+                             extra=log_payload)
 
-                if time_since_request <= CONFIRMATION_TIMEOUT:
-                    logging.info(f"Confirmation received. Initiating full data reset for user {user_id}.",
-                                 extra=log_payload)
+                try:
+                    await self.game_manager.reset_history(user_id)
+                    await self.graph_handler.delete_user_data(user_id)
+                    await self.vector_store_handler.delete_user_collection(user_id)
 
-                    try:
-                        del self.pending_confirmations[user_id]
+                    await message.channel.send(
+                        "The mists clear, and a new adventure begins for you... (Your story and world state have been completely reset). What do you do?")
+                    logging.info(f"Full data reset completed for user {user_id}.", extra=log_payload)
 
-                        await self.game_manager.reset_history(user_id)
-
-                        all_user_node_ids = await self.graph_handler.get_all_user_node_ids(user_id)
-                        if all_user_node_ids:
-                            await self.vector_store_handler.delete_entries(all_user_node_ids)
-
-                        await self.graph_handler.delete_user_data(user_id)
-
-                        await message.channel.send(
-                            "The mists clear, and a new adventure begins for you... (Your story and world state have been completely reset). What do you do?")
-                        logging.info(f"Full data reset completed for user {user_id}.", extra=log_payload)
-
-                    except Exception as e:
-                        logging.error(f"An error occurred during the new game process for user {user_id}.", exc_info=e)
-                        await message.channel.send(
-                            "There was an error trying to start a new game. Please try again shortly.")
-                else:
-                    del self.pending_confirmations[user_id]
-                    await message.channel.send("Confirmation for `!newgame` has expired. Please run the command again.")
+                except Exception as e:
+                    logging.error(f"An error occurred during the new game process for user {user_id}.", exc_info=e)
+                    await message.channel.send(
+                        "There was an error trying to start a new game. Please try again shortly.")
             else:
-                await message.channel.send("You don't have a pending `!newgame` command. Please run `!newgame` first.")
+                if user_id in self.pending_confirmations:
+                    del self.pending_confirmations[user_id]
+                await message.channel.send(
+                    "Confirmation for `!newgame` has expired or was not requested. Please run the command again.")
         else:
             self.pending_confirmations[user_id] = time.time()
             warning_message = (

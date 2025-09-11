@@ -91,7 +91,8 @@ class DiscordHandler(discord.Client):
                 "A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
 
 
-# ... (split_string_by_word_chunks function remains the same) ...
+# TODO: Make this better
+# Temporary hack workaround to get around Discord's characters-per-message limits.
 def split_string_by_word_chunks(text, max_length):
     words = text.split()
     chunks = []
