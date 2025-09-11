@@ -1,4 +1,7 @@
 import logging
+import uuid
+from typing import Optional
+
 from neo4j import AsyncGraphDatabase
 
 
@@ -6,131 +9,113 @@ class GraphHandler:
     """Manages all interactions with the Neo4j graph database."""
 
     def __init__(self, uri, user, password):
-        """Initializes the connection to the Neo4j database."""
-        self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
-        logging.info("Neo4j driver initialized.")
+        """Initializes the Neo4j driver."""
+        try:
+            self.driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
+            logging.info("Neo4j driver initialized successfully.")
+        except Exception as e:
+            logging.error("Failed to initialize Neo4j driver.", exc_info=e)
+            self.driver = None
 
     async def close(self):
-        """Closes the database driver connection."""
-        await self.driver.close()
-        logging.info("Neo4j driver closed.")
+        """Closes the connection to the database."""
+        if self.driver:
+            await self.driver.close()
+            logging.info("Neo4j driver closed.")
 
-    async def get_entity_context(self, user_id: str, entity_name: str) -> str:
+    async def add_or_update_entity(self, user_id: str, entity: dict) -> str:
         """
-        Retrieves an entity and its direct relationships to form a context string.
-
-        Args:
-            user_id: The Discord user ID to scope the search.
-            entity_name: The name of the central entity to query.
-
-        Returns:
-            A formatted string describing the entity and its connections,
-            or an empty string if the entity is not found.
+        Creates or updates an entity node and its properties in the graph for a specific user.
+        This operation is idempotent. It also creates relationships based on properties.
+        Returns the unique ID of the node.
         """
-        logging.info(f"Querying graph context for entity '{entity_name}' for user {user_id}.")
-        async with self.driver.session() as session:
-            # This Cypher query finds the starting node (n) and then optionally matches
-            # all nodes (m) that are connected to it by any relationship (r).
-            result = await session.run(
-                """
-                MATCH (n {name: $name, userId: $userId})
-                OPTIONAL MATCH (n)-[r]-(m)
-                RETURN n, type(r) as rel_type, m
-                """,
-                name=entity_name,
-                userId=user_id
-            )
+        if not self.driver:
+            return None
 
-            records = await result.data()
-            if not records:
-                return ""
-
-            # The first record contains the properties of the main entity itself.
-            main_node = records[0]['n']
-            main_node_type = list(main_node.labels)[0]
-            context_lines = [
-                f"Here is what is known about {main_node['name']} (a {main_node_type}):"
-            ]
-
-            # Add properties of the main node
-            for key, value in main_node.items():
-                if key not in ['name', 'userId']:
-                    context_lines.append(f"- {main_node['name']}'s {key} is {value}.")
-
-            # Add relationships
-            for record in records:
-                if record['rel_type'] and record['m']:
-                    rel_type = record['rel_type'].replace('_', ' ').lower()
-                    target_node = record['m']
-                    context_lines.append(f"- {main_node['name']} {rel_type} {target_node['name']}.")
-
-            return "\n".join(context_lines)
-
-    async def add_or_update_entity(self, user_id: str, entity: dict):
-        """
-        Adds or updates an entity in the graph, creating nodes and relationships.
-        This function is idempotent: running it multiple times has no negative effect.
-
-        Args:
-            user_id: The Discord user ID to scope the data.
-            entity: A dictionary representing the entity, from LLMHandler.
-        """
         entity_name = entity.get("name")
-        entity_type = entity.get("type", "Thing")  # Default type if not specified
+        entity_type = entity.get("type", "Thing")
         properties = entity.get("properties", {})
 
-        if not entity_name:
-            logging.warning(f"Skipping entity with no name: {entity}")
+        # Assign a unique ID if one doesn't exist for relationship linking
+        node_id = str(uuid.uuid4())
+
+        async with self.driver.session() as session:
+            # MERGE finds a node or creates it if it doesn't exist.
+            # We match on both name and userId to ensure data is scoped per user.
+            query = (
+                    "MERGE (n:%s {name: $name, userId: $userId}) "
+                    "ON CREATE SET n.nodeId = $nodeId, n += $props "
+                    "ON MATCH SET n += $props "
+                    "RETURN n.nodeId as nodeId" % entity_type  # Safely inject entity type
+            )
+
+            result = await session.run(query, name=entity_name, userId=user_id, nodeId=node_id, props=properties)
+            record = await result.single()
+            created_node_id = record["nodeId"]
+
+            # Create relationships
+            for key, value in properties.items():
+                if isinstance(value, str):  # Simple relationship check
+                    # Try to link to another entity node owned by the same user
+                    rel_query = (
+                            "MATCH (a {name: $a_name, userId: $userId}), (b {name: $b_name, userId: $userId}) "
+                            "MERGE (a)-[:%s]->(b)" % key.upper()  # Relationship type from property key
+                    )
+                    await session.run(rel_query, a_name=entity_name, b_name=value, userId=user_id)
+
+            return created_node_id
+
+    async def get_all_user_node_ids(self, user_id: str) -> list[str]:
+        """Retrieves all node UUIDs for a given user, used for deletion."""
+        if not self.driver:
+            return []
+
+        async with self.driver.session() as session:
+            query = "MATCH (n {userId: $userId}) WHERE n.nodeId IS NOT NULL RETURN n.nodeId as nodeId"
+            result = await session.run(query, userId=user_id)
+            return [record["nodeId"] async for record in result]
+
+    async def delete_user_data(self, user_id: str):
+        """Deletes all nodes and relationships associated with a user."""
+        if not self.driver:
             return
 
         async with self.driver.session() as session:
-            # Step 1: Create or find the main entity node.
-            # MERGE finds a node with the given properties or creates it if it doesn't exist.
-            # We scope entities by user_id to keep player worlds separate.
-            await session.run(
-                """
-                MERGE (n:%s {name: $name, userId: $userId})
-                ON CREATE SET n += $props
-                ON MATCH SET n += $props
-                """ % entity_type,  # Safely inject the label using %
-                name=entity_name,
-                userId=user_id,
-                props=properties
+            # DETACH DELETE removes nodes and their relationships
+            query = "MATCH (n {userId: $userId}) DETACH DELETE n"
+            await session.run(query, userId=user_id)
+            logging.info(f"Deleted all graph data for user {user_id}.")
+
+    async def get_entity_context(self, user_id: str, node_id: str) -> Optional[str]:
+        """Retrieves a formatted string describing an entity and its direct relationships."""
+        if not self.driver:
+            return None
+
+        async with self.driver.session() as session:
+            query = (
+                "MATCH (n {nodeId: $nodeId, userId: $userId}) "
+                "OPTIONAL MATCH (n)-[r]-(m) "
+                "RETURN n, r, m"
             )
+            result = await session.run(query, nodeId=node_id, userId=user_id)
+            records = await result.list()
 
-            # Step 2: Iterate through properties to create relationship links.
-            for key, value in properties.items():
-                # A simple heuristic: if a property value matches the name of another known entity type,
-                # we assume it's a relationship. This can be made more sophisticated later.
-                # Example: {"workplace": "The Gilded Mug"}
+            if not records:
+                return None
 
-                # Check if the value could be a node itself
-                # For now, let's assume if it's a string, we can try to link it.
-                if isinstance(value, str):
-                    await session.run(
-                        """
-                        // Find the source node (e.g., Blorf)
-                        MATCH (source:%s {name: $source_name, userId: $userId})
-                        // Find or create the target node (e.g., The Gilded Mug)
-                        MERGE (target {name: $target_name, userId: $userId})
-                        // Create a relationship between them
-                        MERGE (source)-[:%s]->(target)
-                        """ % (entity_type, key.upper()),  # e.g., Blorf, WORKS_AT
-                        source_name=entity_name,
-                        target_name=value,
-                        userId=user_id
-                    )
+            main_node = records[0]["n"]
+            node_type = list(main_node.labels)[0]
+            context = f"Here is what is known about {main_node['name']} (a {node_type}):\n"
 
-            logging.info(f"Upserted entity '{entity_name}' for user {user_id}.")
+            props = []
+            for key, value in main_node.items():
+                if key not in ["name", "userId", "nodeId"]:
+                    props.append(f"- {main_node['name']}'s {key} is {value}.")
 
-    async def delete_user_data(self, user_id: str):
-        """Deletes all nodes and relationships associated with a specific user."""
-        try:
-            async with self.driver.session() as session:
-                # This query finds all nodes for a user, and DETACH DELETE removes them
-                # along with any relationships they have.
-                query = "MATCH (n {userId: $userId}) DETACH DELETE n"
-                await session.run(query, userId=user_id)
-                logging.info(f"Successfully deleted all graph data for user {user_id}.")
-        except Exception as e:
-            logging.error(f"Failed to delete graph data for user {user_id}.", exc_info=e)
+            for record in records:
+                if record["r"] and record["m"]:
+                    rel_type = record["r"].type.replace("_", " ").lower()
+                    related_node = record["m"]
+                    props.append(f"- {main_node['name']} {rel_type} {related_node['name']}.")
+
+            return context + "\n".join(props)

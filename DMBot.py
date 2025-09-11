@@ -34,7 +34,6 @@ def main():
             return
 
         llm_handler = LLMHandler(api_key=config["GOOGLE_API_KEY"])
-        db_handler.set_llm_handler(llm_handler)
 
         graph_handler = GraphHandler(
             uri=config["NEO4J_URI"],
@@ -53,6 +52,8 @@ def main():
             graph_handler=graph_handler,
             vector_store_handler=vector_store_handler
         )
+
+        db_handler.set_handlers(llm_handler, graph_handler, vector_store_handler)
 
         # --- Run the Bot ---
         logging.info("All services initialized. Starting the Discord client.")
