@@ -96,7 +96,7 @@ class GraphHandler:
                 "RETURN n, r, m"
             )
             result = await session.run(query, nodeId=node_id, userId=user_id)
-            records = await result.list()
+            records = [record async for record in result]
 
             if not records:
                 return None
