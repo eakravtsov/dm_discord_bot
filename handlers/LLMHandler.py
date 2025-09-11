@@ -170,4 +170,3 @@ class LLMHandler:
         except Exception as e:
             logging.error("Failed to generate history summary.", exc_info=e)
             return "[Summary could not be generated due to an error.]"
-

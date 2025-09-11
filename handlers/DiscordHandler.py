@@ -1,6 +1,6 @@
+import discord
 import logging
 
-import discord
 from handlers.CommandHandler import CommandHandler
 
 
@@ -16,6 +16,7 @@ class DiscordHandler(discord.Client):
         self.game_manager = game_manager
         self.graph_handler = graph_handler
         self.vector_store_handler = vector_store_handler
+        # Pass the current instance 'self' to the CommandHandler
         self.command_handler = CommandHandler(game_manager, graph_handler, vector_store_handler, self)
         logging.info("Discord Bot initialized.")
 
@@ -23,34 +24,24 @@ class DiscordHandler(discord.Client):
         logging.info(f'Logged in as {self.user.name} ({self.user.id})')
         logging.info('The DM is ready to begin the adventure!')
 
-    async def on_message(self, message):
-        if message.author == self.user:
-            return
-
-        user_message_raw = message.content
-        if not self.user.mentioned_in(message) and not user_message_raw.strip().startswith('!'):
-            return
-
-        user_id = str(message.author.id)
-        user_message = user_message_raw.replace(f'<@{self.user.id}>', '').strip()
-
+    async def process_narrative_message(self, original_message, message_to_process):
+        """
+        The core RAG and LLM processing loop for any narrative action.
+        This can be called by a user's chat message or an automated command result.
+        """
+        user_id = str(original_message.author.id)
         log_payload = {
-            "discord_user": message.author.name,
+            "discord_user": original_message.author.name,
             "user_id": user_id,
-            "message_length": len(user_message),
+            "message_length": len(message_to_process),
         }
-
-        if user_message.startswith('!'):
-            await self.command_handler.process_command(message, log_payload)
-            return
-
-        logging.info(f"Processing message: '{user_message}'", extra=log_payload)
+        logging.info(f"Processing narrative message: '{message_to_process}'", extra=log_payload)
 
         try:
-            # The typing indicator now wraps only the generation phase.
-            async with message.channel.typing():
+            dm_response = None
+            async with original_message.channel.typing():
                 # --- Read/Retrieval Phase ---
-                relevant_entity_ids = await self.vector_store_handler.query(user_id, user_message)
+                relevant_entity_ids = await self.vector_store_handler.query(user_id, message_to_process)
                 context_string = ""
                 if relevant_entity_ids:
                     context_items = []
@@ -62,31 +53,44 @@ class DiscordHandler(discord.Client):
                         context_string = "\n".join(context_items)
 
                 # --- Augmented Generation Phase ---
-                await self.game_manager.add_message(user_id, 'user', f"{message.author.name} says: {user_message}")
+                await self.game_manager.add_message(user_id, 'user',
+                                                    f"{original_message.author.name} says: {message_to_process}")
                 history = await self.game_manager.get_history(user_id)
                 dm_response = await self.llm.generate_response(history, context_string)
 
-                # The memory update is triggered inside add_message if the history is full
                 await self.game_manager.add_message(user_id, 'model', dm_response)
 
-            # --- Send Response Phase (Typing indicator is now off) ---
+            # --- Send Response Phase ---
             if dm_response:
                 chunks = split_string_by_word_chunks(dm_response, 1900)
                 for chunk in chunks:
-                    await message.channel.send(chunk)
-
-            # The "Write/Memory Phase" is now handled periodically by the DatabaseHandler,
-            # so we no longer need the fact extraction logic in this real-time loop.
+                    await original_message.channel.send(chunk)
 
         except Exception as e:
-            logging.error(f"An error occurred in main workflow for user {user_id}", exc_info=e)
-            await message.channel.send(
+            logging.error(f"An error occurred in narrative processing for user {user_id}", exc_info=e)
+            await original_message.channel.send(
                 "A strange energy crackles, and the world seems to pause. I need a moment to gather my thoughts. Please try again shortly.")
 
+    async def on_message(self, message):
+        if message.author == self.user:
+            return
 
-# TODO: Make this better
-# Temporary hack workaround to get around Discord's characters-per-message limits.
+        user_message_raw = message.content
+        if not self.user.mentioned_in(message) and not user_message_raw.strip().startswith('!'):
+            return
+
+        user_message = user_message_raw.replace(f'<@{self.user.id}>', '').strip()
+        log_payload = {"discord_user": message.author.name, "user_id": str(message.author.id)}
+
+        # --- Route to the correct handler ---
+        if user_message.startswith('!'):
+            await self.command_handler.process_command(message, log_payload)
+        else:
+            await self.process_narrative_message(message, user_message)
+
+
 def split_string_by_word_chunks(text, max_length):
+    # ... (function remains the same)
     words = text.split()
     chunks = []
     current_chunk = ""
@@ -105,3 +109,4 @@ def split_string_by_word_chunks(text, max_length):
         chunks.append(current_chunk.strip())
 
     return chunks
+

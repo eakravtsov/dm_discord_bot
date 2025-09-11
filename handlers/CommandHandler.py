@@ -1,8 +1,12 @@
+import discord
 import logging
 import random
 import re
 import time
+import asyncio
 
+
+# --- Dice Rolling Function ---
 
 def roll_dice(expression: str) -> int:
     """Rolls dice based on a D&D-style string expression."""
@@ -37,12 +41,16 @@ def roll_dice(expression: str) -> int:
 class CommandHandler:
     """Handles all user commands starting with '!'."""
 
-    def __init__(self, game_manager, graph_handler, vector_store_handler, client):
-        """Initializes the CommandHandler with all necessary data handlers."""
+    def __init__(self, game_manager, graph_handler, vector_store_handler, discord_handler):
+        """
+        Initializes the CommandHandler.
+        Args:
+            discord_handler: The main DiscordHandler instance to call back to.
+        """
         self.game_manager = game_manager
         self.graph_handler = graph_handler
         self.vector_store_handler = vector_store_handler
-        self.client = client
+        self.discord_handler = discord_handler
         self.pending_confirmations = {}
         self.commands = {
             "newgame": self.handle_newgame,
@@ -64,6 +72,29 @@ class CommandHandler:
         else:
             await message.channel.send(f"Unknown command: `!{command}`. Type `!help` for a list of available commands.")
 
+    async def handle_roll(self, message, args, log_payload):
+        """
+        Rolls dice, announces the result, and then pipes the result
+        back to the main narrative processor to continue the story.
+        """
+        if not args:
+            await message.channel.send("Please provide a dice expression to roll, like `!roll 1d20+3`.")
+            return
+
+        expression = "".join(args)
+        try:
+            result = roll_dice(expression)
+            await message.channel.send(f"{message.author.mention} rolls `{expression}` and gets: **{result}**")
+            logging.info(f"User rolled '{expression}' with result {result}.", extra=log_payload)
+
+            roll_result_message = f"[{message.author.name} rolled {expression} and got a {result}]"
+
+            await self.discord_handler.process_narrative_message(message, roll_result_message)
+
+        except (ValueError, TypeError) as e:
+            await message.channel.send(
+                f"I couldn't understand that roll. Please use D&D notation like `1d20` or `2d6+4`.\n*Error: {e}*")
+
     #TODO Simplify this method
     async def handle_newgame(self, message, args, log_payload):
         """
@@ -80,7 +111,6 @@ class CommandHandler:
                              extra=log_payload)
 
                 try:
-                    # Each handler is responsible for its own data.
                     await self.game_manager.reset_history(user_id)
                     await self.graph_handler.delete_user_data(user_id)
                     await self.vector_store_handler.delete_user_collection(user_id)
@@ -108,7 +138,6 @@ class CommandHandler:
             await message.channel.send(warning_message)
 
     async def handle_replay(self, message, args, log_payload):
-        """Replays the last message from the Dungeon Master."""
         user_id = str(message.author.id)
         history = await self.game_manager.get_history(user_id)
         last_dm_message = next((m.get('parts', [None])[0] for m in reversed(history) if m.get('role') == 'model'), None)
@@ -120,28 +149,12 @@ class CommandHandler:
             await message.channel.send("There are no messages from the DM to replay yet!")
         logging.info("User replayed last message.", extra=log_payload)
 
-    async def handle_roll(self, message, args, log_payload):
-        """Rolls dice based on D&D notation."""
-        if not args:
-            await message.channel.send("Please provide a dice expression to roll, like `!roll 1d20+3`.")
-            return
-
-        expression = "".join(args)
-        try:
-            result = roll_dice(expression)
-            await message.channel.send(f"{message.author.mention} rolls `{expression}` and gets: **{result}**")
-            logging.info(f"User rolled '{expression}' with result {result}.\"", extra=log_payload)
-        except (ValueError, TypeError) as e:
-            await message.channel.send(
-                f"I couldn't understand that roll. Please use D&D notation like `1d20` or `2d6+4`.\n*Error: {e}*")
-
     async def handle_help(self, message, args, log_payload):
-        """Displays a help message with all available commands."""
         help_text = """
         **Available Commands:**
         `!newgame` - Resets your current adventure and starts a new one. Requires confirmation.
         `!replay` - Shows the last message from the Dungeon Master again.
-        `!roll <notation>` - Rolls dice using D&D notation (e.g., `!roll 1d20+2d6+3`).
+        `!roll <notation>` - Rolls dice using D&D notation (e.g., `!roll 1d20+2d6+3`). The result is automatically sent to the DM.
         `!help` - Shows this help message.
 
         To interact with the Dungeon Master, just `@` me and describe what you want to do!
